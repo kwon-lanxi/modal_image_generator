@@ -1,0 +1,9 @@
+{
+  "repository": "Viggle/Qwen-Image-2.1-viggle-turbo",
+  "revision": "009a44a895ef85f7e643c80fdca9543795248867",
+  "sha256": {
+    "viggle_turbo.py": "0592defd8ee6555b8c02bd9b287514849b1d46f579f47f8c7f711e6411f89587",
+    "VIGGLE_LICENSE": "8dc973f024ff95966bea25866efa443fd16776dcb1001e681e3d467ea572b28d",
+    "VIGGLE_NOTICE": "69a3dfbdd9f741302f005252a1ced6c75cd56565352ed04fe98dd19abce59be3"
+  }
+}

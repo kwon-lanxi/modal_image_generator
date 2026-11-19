@@ -1,0 +1,72 @@
+import hashlib
+import hmac
+import json
+import time
+from urllib.parse import urlencode
+import pytest
+from logic import OWNER,validate_init,parse_prompt,progress_text
+
+
+def signed(token="token",age=0,user=OWNER):
+    data={"auth_date":str(int(time.time())-age),"user":json.dumps({"id":user})}
+    key=hmac.new(b"WebAppData",token.encode(),hashlib.sha256).digest()
+    data["hash"]=hmac.new(key,"\n".join(k+"="+v for k,v in sorted(data.items())).encode(),hashlib.sha256).hexdigest()
+    return urlencode(data)
+
+
+def test_auth_signature_expiry_owner_and_duplicates():
+    raw=signed();assert validate_init(raw,"token")["id"]==OWNER
+    for bad in [raw+"&auth_date=1",signed(age=4000),signed(user=123)]:
+        with pytest.raises(ValueError):validate_init(bad,"token")
+    with pytest.raises(ValueError):validate_init(raw,"wrong-token")
+
+
+def test_parser_preserves_volume_ids_weights_and_size_override():
+    a={"person":{"id":"krea2-loras-renew/person/checkpoint.safetensors","weight":.8},"style":{"id":"loras/style.safetensors","weight":.4}}
+    r=parse_prompt('a portrait @person:0.7 @style --size vertical -w 896 -h 1152 --seed 42',a)
+    assert r["positive_prompt"]=="a portrait"
+    assert r["width"]==896 and r["height"]==1152 and r["seed"]==42
+    assert r["lora"][a["person"]["id"]]==.7 and r["lora"][a["style"]["id"]]==.4
+
+
+@pytest.mark.parametrize("text",["a @missing:1", "a --size other", "a -w 123", "a --cfg nan", "a --steps 0", "a --seed -1", "a --unknown 1"])
+def test_invalid_inputs_never_become_gpu_recipes(text):
+    with pytest.raises((ValueError,KeyError)):parse_prompt(text,{})
+
+
+def test_no_invented_queue_percent():
+    assert "%" not in progress_text({"stage":"gpu_call"})
+    assert "3/8" in progress_text({"event":"sampling.progress","step":3,"total":8})
+
+
+def test_duplicate_confirmations_and_unknown_submission_do_not_post_twice(monkeypatch):
+    import bot_app as bot
+    import copy
+    db={"job:abc":{"status":"draft","chat":OWNER,"recipe":{"positive_prompt":"test","width":512,"height":512}}}
+    def state(op,key="",value=None):
+        if op=="get":return copy.deepcopy(db.get(key,value))
+        if op=="put":db[key]=copy.deepcopy(value);return value
+    monkeypatch.setattr(bot,"state",state)
+    monkeypatch.setattr(bot,"tg",lambda *args,**kwargs:{"message_id":1})
+    posts=[]
+    def api(method,path,**kwargs):
+        if method=="POST":posts.append(path);raise TimeoutError()
+        raise RuntimeError("record not yet visible")
+    monkeypatch.setattr(bot,"api",api)
+    update={"callback_query":{"id":"callback", "data":"go:abc"}}
+    bot.handle(update);bot.handle(update)
+    bot.advance("abc",db["job:abc"])
+    assert db["job:abc"]["status"]=="needs_review" and len(posts)==1
+    bot.handle({"callback_query":{"id":"recover", "data":"recover:abc"}})
+    bot.advance("abc",db["job:abc"])
+    assert len(posts)==1
+
+
+def test_webhook_rejects_forgery_and_unauthorized_user_before_work(monkeypatch):
+    import bot_app as bot
+    from fastapi.testclient import TestClient
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET","test-secret")
+    client=TestClient(bot.web.local())
+    assert client.post("/webhook",json={"update_id":1}).status_code==403
+    update={"update_id":1,"message":{"from":{"id":123},"chat":{"id":123,"type":"private"},"text":"generate"}}
+    assert client.post("/webhook",headers={"X-Telegram-Bot-Api-Secret-Token":"test-secret"},json=update).json()=={"ok":True}

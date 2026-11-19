@@ -1,0 +1,51 @@
+# Python and local tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.freebuff/
+.agents/
+.claude/
+skills-lock.json
+
+# Credentials and local Modal/Cloudflare state
+.env
+.env.*
+!.env.example
+**/.local-api-token
+**/.deployment.json
+**/.wrangler/
+
+# Local QA, generated smoke outputs, and transient artifacts
+.playground-qa/
+.ui-qa/
+**/.playground-qa/
+**/.ui-qa/
+**/.smoke-*
+**/.batch-smoke.json
+**/.*-batch-result.json
+**/.cold-*.json
+**/.optimized-cold-*.json
+**/.fullsize-validation.json
+**/smoke-preview.*
+**/smoke-final-*
+**/smoke-*.json
+**/smoke-*.png
+**/smoke-*.jpg
+**/.mini-check.js
+*.part
+*.tmp
+*.log
+
+# Model weights and generated image outputs must live in Modal Volumes/R2
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.gguf
+outputs/
+generated/

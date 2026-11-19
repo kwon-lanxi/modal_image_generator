@@ -1,0 +1,36 @@
+{
+  "turbo": {
+    "family": "turbo",
+    "model": "HomoFidelis_Krea2_Turbo_BF16_v1",
+    "weight_dtype": "fp8_e4m3fn_fast",
+    "clip": "qwen_3vl_4b",
+    "vae": "Wan2_1_VAE_fp32",
+    "steps": 8,
+    "cfg": 1.0,
+    "shift": 1.15,
+    "preview_lora": "loras/krea2_turbo_2step_rank_64_lora_comfyui.safetensors",
+    "tae": "vae_approx/TAE_Krea2_AcademiaSD.safetensors"
+  },
+  "turbo-scaled": {
+    "family": "turbo",
+    "model": "HomoFidelis_Krea2_Turbo_fp8_scaled",
+    "weight_dtype": "default",
+    "clip": "qwen_3vl_4b",
+    "vae": "Wan2_1_VAE_fp32",
+    "steps": 8,
+    "cfg": 1.0,
+    "shift": 1.15,
+    "preview_lora": "loras/krea2_turbo_2step_rank_64_lora_comfyui.safetensors",
+    "tae": "vae_approx/TAE_Krea2_AcademiaSD.safetensors"
+  },
+  "raw": {
+    "family": "raw",
+    "model": "krea2_raw_fp8_scaled",
+    "weight_dtype": "default",
+    "clip": "qwen_3vl_4b",
+    "vae": "Wan2_1_VAE_fp32",
+    "steps": 52,
+    "cfg": 3.5,
+    "shift": null
+  }
+}

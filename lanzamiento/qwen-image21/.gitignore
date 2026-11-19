@@ -1,0 +1,12 @@
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+.env
+.env.local
+.playground-qa/
+.local-api-token
+
+.smoke-*
+
+.ui-qa/

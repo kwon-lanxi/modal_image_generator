@@ -1,0 +1,15 @@
+# Krea2 WebUI — Cloudflare Pages project
+name = "krea2-webui"
+compatibility_date = "2025-01-01"
+pages_build_output_dir = "public"
+
+# ── Sync database (Cloudflare D1) ──────────────────────────────
+# 1) npx wrangler d1 create krea2-sync          → te da el database_id
+# 2) pegá el id abajo
+# 3) npx wrangler d1 execute krea2-sync --remote --file=./schema.sql
+# 4) npx wrangler pages deploy public
+#t to your configuration file:
+[[d1_databases]]
+binding = "krea2_sync"
+database_name = "krea2-sync"
+database_id = "377d6ea3-0f4f-427b-bd8c-0a2c97bd8095"

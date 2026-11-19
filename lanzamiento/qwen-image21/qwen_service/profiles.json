@@ -1,0 +1,20 @@
+{
+  "base": {
+    "family": "base",
+    "model": "NREDQW21-UNLOCKED-v1-Comfy-FP8_scaled",
+    "clip": "qwen3vl_8b_heretic_fp8_scaled",
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16",
+    "weight_dtype": "default",
+    "steps": 25,
+    "cfg": 1.0
+  },
+  "base-bf16": {
+    "family": "base",
+    "model": "NREDQW21-UNLOCKED-v1-BF16",
+    "clip": "qwen3vl_8b_bf16_heretic",
+    "vae": "texture_fix_vae_for_qwen_image_2.1_bf16",
+    "weight_dtype": "fp8_e4m3fn_fast",
+    "steps": 25,
+    "cfg": 1.0
+  }
+}

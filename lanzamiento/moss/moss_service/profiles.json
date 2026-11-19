@@ -1,0 +1,20 @@
+{
+  "base": {
+    "family": "base",
+    "model": "moss-base-comfy-fp8_scaled",
+    "clip": "moss-heretic-comfy-fp8_scaled-v2",
+    "vae": "flux2-vae_small",
+    "weight_dtype": "default",
+    "steps": 50,
+    "cfg": 3.0
+  },
+  "sft": {
+    "family": "sft",
+    "model": "moss-sft-comfy-fp8_scaled",
+    "clip": "moss-heretic-comfy-fp8_scaled-v2",
+    "vae": "flux2-vae_small",
+    "weight_dtype": "default",
+    "steps": 50,
+    "cfg": 3.0
+  }
+}

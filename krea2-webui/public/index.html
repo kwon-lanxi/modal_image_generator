@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Krea2 Studio</title>
+<meta name="theme-color" content="#171817" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/animejs@3.2.2/lib/anime.min.js"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        colors: {
+          bg: '#171817', panel: '#202220', panel2: '#292c29', edge: '#41453f',
+          txt: '#f0eee5', dim: '#b0b1a8',
+          accent: { 500: '#5285ec', 600: '#3768ce', orange: '#ed4538', yellow: '#f0c84b' },
+        },
+        fontFamily: { sans: ['Outfit', 'system-ui', 'Segoe UI', 'Roboto', 'sans-serif'] },
+      },
+    },
+  };
+</script>
+<link rel="stylesheet" href="./css/styles.css" />
+</head>
+<body class="bg-bg text-txt font-sans antialiased min-h-screen flex flex-col">
+<a class="skip-link" href="#main-content">Saltar al contenido</a>
+
+<!-- ══════════════ HEADER ══════════════ -->
+<header class="sticky top-0 z-40 border-b border-edge bg-[#202020]/95 backdrop-blur">
+  <div class="flex items-center gap-3 px-3 sm:px-4 h-14">
+    <div class="flex items-center gap-2 shrink-0">
+      <span class="brand-mark" aria-hidden="true">K2</span>
+      <h1 class="font-bold tracking-tight text-[17px] hidden xs:block sm:block">Krea2 <span class="brand-word">Studio</span></h1>
+    </div>
+
+    <div class="flex items-center gap-2 ml-2 sm:ml-4 text-[13px]">
+      <button type="button" id="gpu-chip" class="flex items-center gap-1.5 px-2 py-1 rounded-md bg-panel border border-edge cursor-pointer hover:border-accent-500/60 transition-colors" title="GPU (Beam) — click para verificar estado" aria-label="Verificar estado del servicio GPU">
+        <i id="dot-gpu" class="dot bg-gray-500" aria-hidden="true"></i><span class="hidden sm:inline">GPU</span>
+      </button>
+      <span class="flex items-center gap-1.5 px-2 py-1 rounded-md bg-panel border border-edge" title="Manager CPU (Beam)">
+        <i id="dot-manager" class="dot bg-red-500" aria-hidden="true"></i><span class="hidden sm:inline">Manager</span>
+      </span>
+      <button type="button" class="flex items-center gap-1.5 px-2 py-1 rounded-md bg-panel border border-edge cursor-pointer" id="sync-chip" title="Sync: compartí esta clave entre tu teléfono y PC" aria-label="Abrir configuración de sincronización">
+        <i id="dot-sync" class="dot bg-red-500" aria-hidden="true"></i><span id="sync-key-label" class="max-w-[90px] truncate">sin sync</span>
+      </button>
+    </div>
+
+    <div class="flex-1"></div>
+    <button type="button" id="btn-settings" class="btn-ghost px-2.5 py-1.5 rounded-lg text-sm" title="Configuración" aria-label="Abrir configuración">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </div>
+
+  <!-- Tab bar (móvil: scrolleable horizontal) -->
+  <nav id="tabbar" class="flex lg:hidden gap-1 px-2 pb-2 overflow-x-auto no-scrollbar" aria-label="Secciones principales"></nav>
+  <nav id="create-subnav" class="hidden lg:hidden gap-1 px-2 pb-2 overflow-x-auto no-scrollbar" aria-label="Herramientas de creación"></nav>
+</header>
+
+<!-- ══════════════ WARM BAR (ventana de warm después de generar) ══════════════ -->
+<!--
+  Al generar una imagen, el contador se resetea a warmWindowSec. Mientras está
+  dentro de la ventana, el siguiente gen usa la caché LRU del GPU (UNET/CLIP/VAE
+  en VRAM + LoRAs aplicados). Al expirar, se muestra "frío" pero NO se llama
+  /warmup automáticamente (vos decidís si querés gastar segundos facturados).
+-->
+<div id="warm-bar" title="El GPU permanece caliente durante la ventana configurada desde la última imagen generada.">
+  <div class="warm-bar-inner">
+    <div class="warm-context">
+      <span class="warm-flame" aria-hidden="true">🔥</span>
+      <span class="warm-title">GPU</span>
+      <span id="warm-state" class="warm-state is-idle" role="status" aria-live="polite">Sin actividad</span>
+    </div>
+    <label class="warm-window" for="warm-slider">
+      <span class="warm-caption">Ventana</span>
+      <input id="warm-slider" type="range" min="30" max="900" step="30"
+             aria-label="Duración de la ventana caliente del GPU" aria-describedby="warm-label" />
+      <span id="warm-label" class="warm-duration">5m 0s</span>
+    </label>
+    <div class="warm-remaining">
+      <span class="warm-caption">Restante</span>
+      <span id="warm-countdown" class="warm-countdown">—</span>
+    </div>
+    <div id="warm-progress" class="warm-progress" role="progressbar" aria-label="Tiempo restante de la ventana caliente" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="Sin actividad">
+      <div id="warm-fill" class="warm-fill is-idle" style="width:0%"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ BODY ══════════════ -->
+<div class="flex flex-1 min-h-0">
+  <!-- Sidebar (desktop) -->
+  <aside id="sidebar" class="hidden lg:flex flex-col w-52 shrink-0 border-r border-edge bg-[#1e1e1e] p-2 gap-1 overflow-y-auto" aria-label="Tabs"></aside>
+
+  <!-- Main -->
+  <main id="main-content" tabindex="-1" class="flex-1 min-w-0 overflow-y-auto p-3 sm:p-4">
+    <div id="toast-root" class="fixed top-16 right-3 z-50 space-y-2 w-72 max-w-[90vw]" aria-live="polite" aria-atomic="false"></div>
+
+    <!-- GENERATE: en celular el resultado (imagen) va PRIMERO; el formulario abajo -->
+    <!-- El cuadro de la imagen está SIEMPRE visible (placeholder hasta que generás) -->
+    <section id="tab-generate" class="tab hidden">
+      <div class="grid lg:grid-cols-[minmax(0,1fr)_560px] gap-4 items-start">
+        <div id="gen-result-generate" class="order-1 lg:order-2 space-y-2.5 min-w-0 img-frame">
+          <div class="img-placeholder"><div class="text-2xl" aria-hidden="true">●</div><div>La imagen va a aparecer acá</div><div class="opacity-70">Generá para ver el resultado</div></div>
+        </div>
+        <div id="gen-form-generate" class="order-2 lg:order-1 space-y-2.5 min-w-0"></div>
+      </div>
+    </section>
+
+    <!-- VARIATION -->
+    <section id="tab-variation" class="tab hidden">
+      <div class="grid lg:grid-cols-[minmax(0,1fr)_560px] gap-4 items-start">
+        <div id="gen-result-variation" class="order-1 lg:order-2 space-y-2.5 min-w-0 img-frame">
+          <div class="img-placeholder"><div class="text-2xl" aria-hidden="true">●</div><div>La imagen va a aparecer acá</div><div class="opacity-70">Generá para ver el resultado</div></div>
+        </div>
+        <div id="gen-form-variation" class="order-2 lg:order-1 space-y-2.5 min-w-0"></div>
+      </div>
+    </section>
+
+    <!-- EDIT -->
+    <section id="tab-edit" class="tab hidden">
+      <div class="grid lg:grid-cols-[minmax(0,1fr)_560px] gap-4 items-start">
+        <div id="gen-result-edit" class="order-1 lg:order-2 space-y-2.5 min-w-0 img-frame">
+          <div class="img-placeholder"><div class="text-2xl" aria-hidden="true">●</div><div>La imagen va a aparecer acá</div><div class="opacity-70">Generá para ver el resultado</div></div>
+        </div>
+        <div id="gen-form-edit" class="order-2 lg:order-1 space-y-2.5 min-w-0"></div>
+      </div>
+    </section>
+
+    <!-- DEPTH -->
+    <section id="tab-depth" class="tab hidden">
+      <div class="grid lg:grid-cols-[minmax(0,1fr)_560px] gap-4 items-start">
+        <div id="gen-result-depth" class="order-1 lg:order-2 space-y-2.5 min-w-0 img-frame">
+          <div class="img-placeholder"><div class="text-2xl" aria-hidden="true">●</div><div>La imagen va a aparecer acá</div><div class="opacity-70">Generá para ver el resultado</div></div>
+        </div>
+        <div id="gen-form-depth" class="order-2 lg:order-1 space-y-2.5 min-w-0"></div>
+      </div>
+    </section>
+
+    <!-- UPSCALE (v9.2 standalone /upscale) -->
+    <section id="tab-upscale" class="tab hidden">
+      <div class="grid lg:grid-cols-[minmax(0,1fr)_560px] gap-4 items-start">
+        <div id="gen-result-upscale" class="order-1 lg:order-2 space-y-2.5 min-w-0 img-frame">
+          <div class="img-placeholder"><div class="text-2xl" aria-hidden="true">○</div><div>El upscale va a aparecer acá</div><div class="opacity-70">Subí una imagen, elegí el modelo y upscaleala</div></div>
+        </div>
+        <div id="gen-form-upscale" class="order-2 lg:order-1 space-y-2.5 min-w-0"></div>
+      </div>
+    </section>
+
+    <!-- MODELS (manager) -->
+    <section id="tab-models" class="tab hidden">
+      <div class="space-y-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <input id="models-search" type="search" placeholder="Buscar modelo…" class="input max-w-xs" />
+          <select id="models-type" class="input">
+            <option value="lora">LoRAs</option>
+            <option value="unet">UNET</option>
+            <option value="clip">CLIP</option>
+            <option value="vae">VAE</option>
+            <option value="upscale">Upscale</option>
+          </select>
+          <select id="models-version" class="input" title="Filtrar LoRAs por versión (manager v2.7)">
+            <option value="all">Versión: todas</option>
+            <option value="v1">v1</option>
+            <option value="v2">v2</option>
+            <option value="general">general</option>
+          </select>
+          <label class="flex items-center gap-1.5 text-xs text-dim" title="Agrupar LoRAs por personaje (carpeta) en la tabla">
+            <input type="checkbox" id="models-group-char" class="toggle-check" /><span class="toggle"></span> agrupar por personaje
+          </label>
+          <button id="models-refresh" class="btn-ghost">⟳ Refrescar</button>
+          <button id="models-clear-cache" class="btn-ghost" title="Borrar cachés locales (modelos, galería, formularios) y recargar">🗑 Borrar caché</button>
+          <button id="models-show-download" class="btn-ghost">⬇ Descargar modelo</button>
+          <div class="flex-1"></div>
+          <span id="models-count" class="text-xs text-dim"></span>
+          <span id="models-stamp" class="text-xs text-dim"></span>
+        </div>
+        <div id="models-download-panel" class="hidden panel p-3 space-y-3">
+          <div class="grid sm:grid-cols-2 gap-2">
+            <select id="dl-source" class="input"><option value="civitai">CivitAI</option><option value="huggingface">HuggingFace</option></select>
+            <select id="dl-target" class="input">
+              <option value="lora">Destino: → loras</option><option value="unet">Destino: → diffusion_models</option>
+              <option value="clip">Destino: → text_encoders</option><option value="vae">Destino: → vae</option>
+              <option value="upscale">Destino: → upscale</option>
+            </select>
+          </div>
+          <div id="dl-civitai-fields" class="space-y-2">
+            <label class="block text-xs text-dim">URL de descarga de CivitAI (…/api/download/models/ID)</label>
+            <input id="dl-url" type="url" placeholder="https://civitai.com/api/download/models/123" class="input" />
+          </div>
+          <div id="dl-hf-fields" class="hidden space-y-2">
+            <div>
+              <label class="block text-xs text-dim">URI de HuggingFace — mismo formato que <span class="mono">hf download</span></label>
+              <input id="dl-hf-uri" type="text" placeholder="hf://usuario/repo/subcarpeta/archivo.safetensors" class="input" />
+            </div>
+            <div class="grid sm:grid-cols-3 gap-2">
+              <input id="dl-repo" type="text" placeholder="repo_id: usuario/repo" class="input" />
+              <input id="dl-hf-subfolder" type="text" placeholder="carpeta en el repo (opcional)" class="input" />
+              <input id="dl-filename" type="text" placeholder="filename: archivo.safetensors" class="input" />
+            </div>
+            <div>
+              <label class="block text-xs text-dim">Subcarpeta destino dentro del volumen (opcional, ej: anime/v2)</label>
+              <input id="dl-subfolder" type="text" placeholder="subcarpeta destino (opcional)" class="input" />
+            </div>
+          </div>
+          <div class="grid sm:grid-cols-2 gap-2">
+            <input id="dl-name" type="text" placeholder="Nombre personalizado (ej: mi_lora)" class="input" />
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="dl-overwrite" class="toggle-check" /> sobrescribir si ya existe</label>
+          </div>
+          <div class="flex gap-2">
+            <button id="dl-go" class="btn-primary">⬇ Descargar ahora</button>
+            <button id="dl-batch-go" class="btn-secondary">+ Agregar a la cola</button>
+          </div>
+          <div id="dl-batch-box" class="hidden space-y-2 border-t border-edge pt-2">
+            <div id="dl-batch-list" class="space-y-1 max-h-40 overflow-y-auto text-xs"></div>
+            <div class="flex gap-2 items-center">
+              <button id="dl-batch-run" class="btn-primary">▶ Ejecutar cola (N)</button>
+              <button id="dl-batch-clear" class="btn-ghost">Vaciar cola</button>
+            </div>
+          </div>
+          <div id="dl-tasks-box" class="hidden space-y-2 border-t border-edge pt-2">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-semibold">📥 Descargas</h3>
+              <button id="dl-tasks-clear-done" class="btn-ghost text-xs">Limpiar terminadas</button>
+            </div>
+            <div id="dl-tasks-list" class="space-y-2"></div>
+          </div>
+        </div>
+        <div class="panel overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead><tr class="text-left text-dim text-xs border-b border-edge">
+              <th class="p-2">Modelo</th><th class="p-2">Tipo</th><th class="p-2">Tamaño</th><th class="p-2">Volumen</th><th class="p-2 text-right">Acciones</th>
+            </tr></thead>
+            <tbody id="models-tbody"></tbody>
+          </table>
+        </div>
+        <!-- Operaciones del manager (historial de administración) — v2.3: vive acá, donde se administra -->
+        <div>
+          <div class="flex flex-wrap items-center gap-2 mb-2">
+            <h2 class="font-semibold text-sm">🗂️ Operaciones del manager</h2>
+            <select id="hist-action-filter" class="input !py-1 text-xs">
+              <option value="">Todas</option><option value="download">download</option><option value="delete">delete</option>
+              <option value="move">move</option><option value="rename">rename</option><option value="cleanup">cleanup</option>
+              <option value="archive">archive</option><option value="upload">upload</option>
+            </select>
+            <div class="flex-1"></div>
+            <button id="hist-stats" class="btn-ghost text-xs">Stats</button>
+            <button id="hist-rebuild" class="btn-ghost text-xs">Reconstruir índice</button>
+            <button id="hist-download" class="btn-ghost text-xs">⬇ JSON</button>
+          </div>
+          <div id="hist-stats-box" class="hidden panel p-3 mb-2 text-sm grid grid-cols-2 sm:grid-cols-4 gap-2"></div>
+          <div class="panel overflow-x-auto">
+            <table class="w-full text-xs sm:text-sm">
+              <thead><tr class="text-left text-dim border-b border-edge">
+                <th class="p-2">Fecha</th><th class="p-2">Acción</th><th class="p-2">Resultado</th><th class="p-2">Detalle</th>
+              </tr></thead>
+              <tbody id="hist-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- GALERÍA: imágenes (D1 + volume) — v2.3 separada del historial -->
+    <section id="tab-gallery" class="tab hidden">
+      <div class="space-y-4">
+        <div>
+          <div class="flex flex-wrap items-center gap-2 mb-2">
+            <h2 class="font-semibold text-sm">🖼 Galería <span class="text-dim font-normal">(R2 + volume, sincronizada)</span></h2>
+            <div class="flex-1"></div>
+            <button id="outputs-upload" class="btn-ghost text-xs">⬆ Subir</button>
+            <button id="outputs-zip" class="btn-ghost text-xs">⬇ ZIP</button>
+            <button id="outputs-cleanup" class="btn-ghost text-xs">🧹 Cleanup</button>
+            <button id="hist-refresh-gen" class="btn-ghost text-xs">⟳ Refrescar</button>
+            <input type="file" id="outputs-upload-input" accept="image/*" class="hidden" />
+            <select id="hist-gen-tab-filter" class="input !py-1 text-xs">
+              <option value="">Todas</option><option value="generate">Generate</option>
+              <option value="variation">Variation</option><option value="edit">Edit</option><option value="depth">Depth</option>
+            </select>
+            <span id="hist-count" class="text-xs text-dim" role="status" aria-live="polite"></span>
+          </div>
+          <div id="gal-toolbar" class="mb-2"></div>
+          <div id="gal-selbar" class="mb-2"></div>
+          <div id="hist-gen-grid"></div>
+          <div id="gal-pager" class="mt-2"></div>
+          <div id="hist-gen-empty" class="hidden text-center text-dim text-sm py-8 border border-dashed border-edge rounded-lg">
+            Todavía no hay imágenes. Generá algo o subí un archivo: aparece acá y se sincroniza entre tus dispositivos.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- HISTORIAL: log físico del GPU — v2.3 (las operaciones del manager viven en Models) -->
+    <section id="tab-history" class="tab hidden">
+      <div class="space-y-5">
+        <!-- Log físico del servicio (GPU y CPU, append-only) -->
+        <div>
+          <div class="flex flex-wrap items-center gap-2 mb-2">
+            <h2 class="font-semibold text-sm">📜 Log físico del servicio</h2>
+            <div class="flex items-center gap-1 text-xs" id="log-service-seg">
+              <button data-service="gpu" class="seg-btn active" title="gpu_service.log — lo escribe krea2_v9_1-upscale.py">GPU</button>
+              <button data-service="manager" class="seg-btn" title="manager_service.log — lo escribe el manager CPU">CPU</button>
+            </div>
+            <span id="gpu-log-src" class="text-dim text-xs mono"></span>
+            <div class="flex-1"></div>
+            <select id="gpu-log-tail" class="input !py-1 text-xs">
+              <option value="50">50 líneas</option>
+              <option value="200" selected>200 líneas</option>
+              <option value="1000">1000 líneas</option>
+              <option value="0">todo</option>
+            </select>
+            <input id="gpu-log-grep" type="search" placeholder="filtrar (endpoint, seed…)" class="input !py-1 text-xs max-w-[170px]" />
+            <button id="gpu-log-refresh" class="btn-ghost text-xs" title="Refrescar">⟳</button>
+            <button id="gpu-log-dl" class="btn-ghost text-xs" title="Descargar raw">⬇ raw</button>
+          </div>
+          <div id="gpu-log-box" class="panel p-2 mono text-[11px] max-h-[420px] overflow-y-auto overflow-x-auto space-y-px"></div>
+          <div id="gpu-log-empty" class="hidden text-center text-dim text-sm py-6 border border-dashed border-edge rounded-lg mt-2">
+            El servicio todavía no escribió nada en su log.
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Modal root -->
+<div id="modal-root"></div>
+<div id="modal-backdrop" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm"></div>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>

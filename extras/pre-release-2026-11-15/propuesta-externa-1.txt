@@ -1,0 +1,134 @@
+Hice una revisión completa tanto de tu script (`krea2_modal_v1-deepseek.py`) como de cómo funcionan hoy **Modal** y el ecosistema de **Krea 2 / ComfyUI** en serverless. Tu archivo actual tiene mucho código heredado de Beam Cloud, nodos pesados que no usás y varios bugs silenciosos que te están haciendo gastar más tiempo y dinero del necesario.
+
+Acá tenés toda la investigación ordenada en 5 puntos concretos.
+
+---
+
+### 1. Diagnóstico de tu script actual: qué sobra y qué está roto
+
+#### A. Código muerto / peso muerto para borrar
+Si solo querés **generación de imágenes (txt2img) + LoRAs**, podés eliminar ~60% del archivo y de la imagen Docker:
+* **Custom nodes pesados en `_build_image()`:** `comfyui_controlnet_aux` (gigante, instala `timm`, `opencv`, `matplotlib`, etc. y frena mucho el arranque), `comfyui-krea2edit`, `comfyui-krea2-controlnet` y hasta `ComfyUI-VAE-Utils` (ComfyUI ya soporta Krea 2 de forma nativa desde la v0.25.0, incluyendo `CLIPLoader(type="krea2")` y `VAEDecodeTiled`).
+* **Endpoints y métodos sin uso:** `/variation`, `/edit`, `/depth-generate`, `upscale_image`, `blend_latents`, `reference_images`, `cache_upscale`, `cache_vae_latent`, `DIR_UPSCALE`.
+* **Sistema de eventos/locks heredado de Beam:** `_EventBus` (no tenés ningún endpoint SSE/streaming conectado a él) y `_EngineStateMachine` (en Modal se resuelve nativamente con `@modal.concurrent(max_inputs=1)`).
+* **Escritura inútil al Volumen:** En `save_image()` hacés `(DIR_OUTPUTS / fname).write_bytes(raw)` sobre el Volumen montado aunque ya subís a R2 o devolvés base64. Eso agrega latencia de I/O antes de responder y ensucia el Volumen.
+
+#### B. Bugs reales que te están frenando o haciendo gastar de más
+1. **El warmup del UNET está fallando en silencio:**
+   En `_warmup_unet_dummy()` armaste tensores falsos con shape `(1, 256, 30720)`, `pooled_output` de `768` y `float16`. Esas dimensiones no son de Krea 2 + Qwen3-VL 4B. Como está envuelto en `try/except`, tira un `WARN` y **no calienta el UNET en el snapshot**; recién se compilan los kernels cuando mandás tu primer pedido real. *Solución:* en el warmup usá el `clip` y `make_empty_latent` reales con 1 paso de `KSampler`.
+2. **Defaults equivocados para Krea 2 Turbo:**
+   Tu `generate()` tiene `steps=28` y `scheduler="beta"`. `HomoFidelis_Krea2_Turbo_BF16_v1` es un modelo **Turbo destilado para 8 pasos** (`cfg=1.0`, `sampler="euler"` o `"er_sde"`, `scheduler="simple"`). Correrlo a 28 pasos te hace pagar **3.5× más GPU** por imagen y puede hasta empeorar la calidad.
+3. **El caché de LoRAs (`cache_lora`) se invalida si cambiás de resolución:**
+   En `apply_loras()` pasás `variant_key=(round(mu_value, 4), width, height)`. Si hacés una preview a `512×512` y luego la final a `1024×1024` con los mismos LoRAs, **falla el caché** y vuelve a leer y parchear los LoRAs desde el disco. *Solución:* aplicá `apply_krea_time_shift` **después** de `apply_loras` (clonar el `ModelPatcher` en memoria para cambiar el `shift` es instantáneo y no toca los pesos) y sacá `width, height` del `combo_key`.
+4. **`SageAttention` mal configurado:**
+   ComfyUI no lee `COMFYUI_ATTENTION_BACKEND="sage"`. Y además instalás `sageattention` desde PyPI (que suele instalar v1 en Triton, más lenta que **SageAttention 2** en kernels CUDA para Ada Lovelace `sm_89`). Hay que setear `comfy.cli_args.args.use_sage_attention = True` (o usar PyTorch SDPA / FlashAttention / SageAttention 2 bien compilado para `cu128`).
+5. **Symlink dentro del Volumen:**
+   En `_ensure_comfy_symlinks()` creás `DIR_LORAS_MAIN / "renew_vol"` *adentro* de `/krea2-beam-volume`. Modificar un `modal.Volume` en runtime dentro de un contenedor con Snapshot es mala práctica. Ya registraste ambos paths con `folder_paths.add_model_folder_path("loras", ...)` y usás tu `LoraRegistry`: con eso alcanza y sobra.
+6. **Pricing falso en los logs y endpoint abierto al público:**
+   * Tenés precios de Beam (`0.000191667/s`). En Modal (2026), la **L40S cuesta `$0.000542 / seg`** (`~$1.95/hr`) más CPU y RAM (`~$0.0006/seg` en total).
+   * Tu `@modal.asgi_app()` hoy no tiene autenticación: cualquiera que descubra la URL puede generarte imágenes y gastarte créditos. Agregale un header secreto (`Authorization: Bearer ...`) o `requires_proxy_auth=True` si usás `@modal.fastapi_endpoint`.
+
+---
+
+### 2. Cómo cortar la GPU apenas termina vs. Snapshots (la matemática real para no gastar al vicio)
+
+Acá está el punto más importante sobre cómo funciona **Modal** frente a Hugging Face:
+
+* **¿Se puede apagar la GPU apenas termina la imagen?**
+  **Sí.** El parámetro `scaledown_window` (antes `container_idle_timeout`) acepta desde **2 segundos** hasta 20 minutos. Hoy lo tenés en **`60` segundos** (cada vez que terminás de generar una imagen, dejás la L40S prendida al vicio 1 minuto entero = **~$0.036 tirados por pausa**). Si ponés `scaledown_window=2`, a los **2 segundos** de entregar la respuesta Modal mata el contenedor y dejás de pagar por segundo.
+
+* **PERO ojo con `scaledown_window=2` en un flujo "Preview → Miro → Genero Full":**
+  Aunque uses **GPU Memory Snapshots** (`enable_memory_snapshot=True` + `enable_gpu_snapshot=True`), restaurar un snapshot no tarda 0 segundos. Modal tiene que leer desde su almacenamiento distribuido toda la memoria CPU+GPU congelada (~1 a 2 GB/s en Volúmenes/snapshots).
+  * Si congelaste un modelo **BF16 (~25 GB)** + Qwen3VL (~8 GB) = **~33 GB** para restaurar cada vez que arranca de cero (~6 a 12+ segundos de restore).
+  * Si hacés una preview de 2 pasos (1s), la mirás **15 segundos** en tu pantalla para decidir si te gustó, y la GPU se apagó a los 2 segundos: cuando apretás "Generar Full", **te volvés a comer todo el arranque del snapshot (y también te lo cobran)**.
+  * En cambio, mantener la L40S prendida esos 15 segundos cuesta `15 × $0.0006 = $0.009` (menos de 1 centavo de dólar), prácticamente lo mismo o menos que restaurar dos veces el snapshot, ¡y la imagen final sale al instante!
+
+**¿Qué te conviene entonces?**
+1. **Para uso interactivo (preview → elegir → generar final):** poné **`scaledown_window=15` o `20`** (en vez de `60`). Es tiempo justo para mirar la preview y apretar "Generar", sin pagar minutos muertos cuando te vas a hacer otra cosa.
+2. **Para uso súper esporádico o lotes automáticos:** poné **`scaledown_window=2`** (o `5`).
+3. **Truco para que el Snapshot restaure mucho más rápido (mitad de peso):**
+   Pasar de **BF16 (~25 GB)** a **FP8 (`fp8_e4m3fn_fast`)** reduce a la mitad la VRAM/RAM capturada en el GPU Snapshot (~12 GB de UNET + ~4.5 GB de Qwen3-VL FP8). Menos gigas congelados = arranque en frío casi el doble de rápido.
+
+*(Nota sobre GPU: En Modal la **A10** sale casi la mitad que la L40S (`$0.000306/s` vs `$0.000542/s`), pero tiene 24 GB de VRAM y no tiene Tensor Cores FP8 nativos. Con Krea 2 FP8 (~12 GB) + Qwen3VL (~5-8 GB) + activaciones + LoRAs queda muy justa o hace OOM; la **L40S (48 GB)** sigue siendo la mejor relación precio/velocidad/VRAM para Krea 2).*
+
+---
+
+### 3. Cómo hacer una Preview rápida de 2 pasos con LoRAs (las 2 piezas clave del ecosistema 2026)
+
+Si bajás Krea 2 Turbo de 8 pasos a 2 pasos "a pelo", las imágenes salen lavadas, borrosas o sin estructura. Para que una **preview de 2 pasos con tus LoRAs** se vea nítida y representativa del resultado final, hoy tenés dos herramientas hechas exactamente para Krea 2:
+
+1. **LoRA de destilación a 2 pasos: `lvladikov/Krea2-Turbo-Distill-2step-LoRA`**
+   * Archivo: `krea2_turbo_2step_rank_64_lora_comfyui.safetensors` (está publicado en Hugging Face, usa nodos nativos de ComfyUI, sin custom nodes).
+   * Fue entrenado por *distribution matching* específicamente sobre Krea 2 Turbo para mantener la composición, sujetos y fidelidad al prompt en **solo 2 pasos** (1/4 del costo de denoising).
+   * **Parámetros exactos para `/preview`:**
+     * Sumás este LoRA con peso `1.0` (o `0.85–1.0` junto a tus LoRAs de personaje/estilo).
+     * `steps = 2`, `cfg = 1.0` (en ComfyUI `1.0` = sin CFG; **nunca** pongas `0.0`), `sampler = "euler"`, `scheduler = "simple"`.
+     * Como comparte la arquitectura Krea 2 Turbo con `HomoFidelis_Krea2_Turbo`, lo apilás igual que cualquier otro LoRA. *(Si quisieras más detalle intermedio, el mismo autor tiene la versión de 3 y 4 pasos)*.
+
+2. **Tiny AutoEncoder para Krea 2: `AcademiaSD/TAE-Krea-2` (`TAE_Krea2_AcademiaSD.safetensors`)**
+   * **El cuello de botella oculto:** Un sampling de 2 pasos en L40S tarda ~0.5–0.8s, pero el **VAE completo (`wan_2.1_vae` / `qwen_image_vae`) tarda ~0.8–1.5s** en decodificar. ¡El VAE te duplica el tiempo de la preview!
+   * **`TAE_Krea2_AcademiaSD.safetensors`** pesa solo **2.5 MB** y decodifica un latente `Wan21` (el formato exacto que usa Krea 2) de `1024×1024` en **~12 milisegundos** con una nitidez de **36.1 dB PSNR** (a diferencia del `Latent2RGB` borroso de ComfyUI).
+   * *Cómo usarlo sin instalar custom nodes pesados:* Es una CNN chiquita (1.23M parámetros), podés usarla directamente en 15 líneas de PyTorch en tu endpoint `/preview` (o instalar solo `ComfyUI-KJNodes` si preferís nodo visual).
+   * **Extra de velocidad en `/preview`:** devolvé la imagen en **JPEG (`quality=80`) o WebP** directo en base64, **sin subir a R2 y sin escribir al Volumen**. Te ahorrás otros ~400–800 ms de compresión PNG + subida HTTP a R2.
+
+---
+
+### 4. Optimizaciones extra para ComfyUI Serverless
+
+1. **Eliminá `init_extra_nodes()` por completo:**
+   Si no usás custom nodes, no ejecutes `init_extra_nodes()` (te ahorrás escanear cientos de nodos innecesarios en cada arranque). Importá únicamente las clases que necesitás de `nodes`: `UNETLoader`, `CLIPLoader`, `VAELoader`, `CLIPTextEncode`, `EmptySD3LatentImage` (o `EmptyLatentImage`), `KSampler`, `VAEDecode` y `ModelSamplingFlux` (o `ModelSamplingAuraFlow`).
+2. **Activá FP8 nativo en L40S (`fp8_e4m3fn_fast`):**
+   La L40S es arquitectura Ada Lovelace (`sm_89`), que tiene **Tensor Cores FP8 por hardware**.
+   * En tu `load_unet`, en lugar de probar `["fp8_e4m3fn", ...]`, probá **`"fp8_e4m3fn_fast"`** primero (requiere tener activado `--fast` / `fp8_optimizations` en `comfy.cli_args.args.fast = {"fp8_matrix_mult"}` o similar según tu versión de ComfyUI).
+   * *Nota de calidad:* Si notás que cuantizar tu checkpoint BF16 al vuelo a `fp8_e4m3fn` pierde algo de fidelidad en piel/ojos, considerá guardar una versión **`fp8_scaled`** en tu Volumen (mantiene en BF16/FP32 las capas sensibles de modulación y normas) y cargarla con `weight_dtype="default"`.
+3. **Usá `uv_pip_install` en la imagen de Modal:**
+   `modal.Image.uv_pip_install(...)` construye la imagen 5×–10× más rápido y evita que `cd /root/ComfyUI && pip install -r requirements.txt` te pise la versión de `torch` CUDA 12.8 que acabás de instalar.
+4. **`torch.compile` — ¿sí o no con LoRAs dinámicos?**
+   Con GPU Memory Snapshots podés capturar un modelo ya compilado (`torch.compile`), pero en ComfyUI cuando aplicás distintos LoRAs y distintas resoluciones (preview `512/768` vs full `1024+`), `torch.compile` puede disparar recompilaciones lentas en medio de tu pedido. Si cambiás mucho de LoRAs y resoluciones, **`fp8_e4m3fn_fast` + `SageAttention2` sin `torch.compile`** te da tiempos mucho más predecibles.
+5. **Pre-fusión / Cache de LoRA inteligente:**
+   * En `/preview`, la gente suele cambiar el `prompt` o `seed`, o probar un LoRA. Como el `CLIPTextEncode` con Qwen3-VL 4B tarda un poco en tokenizar/evaluar prompts largos, mantener `cache_conditioning` en CPU/GPU es excelente (pero limitá el key a `(clip_id, prompt)` sin `negative` si para Krea 2 Turbo `cfg=1.0` directamente **no evalúa el prompt negativo** — ¡en ComfyUI con `cfg=1.0` el conditioning negativo ni siquiera se pasa por el UNET, aunque igual no hace falta gastar tiempo haciendo `encode` de `negative` si `cfg <= 1.0`!).
+   * ¡Gran ahorro escondido!: En tu `encode_prompt()`, siempre corrés `encoder.encode(clip, negative or " ")` aunque `cfg=1.0`! Si `cfg == 1.0`, pasá un conditioning vacío pre-cacheados una vez y **ahorrá el 50% del tiempo del Text Encoder Qwen3-VL 4B**.
+
+---
+
+### 5. Arquitectura recomendada (limpia, mínima y lista para vos)
+
+Te quedaría una app súper simple con **solo 3 endpoints**:
+
+1. **`POST /preview`**:
+   * Fuerza/inyecta `krea2_turbo_2step_rank_64_lora_comfyui` (peso `1.0`) + tus LoRAs.
+   * Defaults: `steps=2`, `cfg=1.0`, `sampler="euler"`, `scheduler="simple"`, resolución sugerida `768×768` (o la proporción que pidas escalada a ~0.6 MP).
+   * Decode con `TAE_Krea2_AcademiaSD` (o VAE si no lo descargaste aún).
+   * Formato **JPEG base64** directo en la respuesta (sin R2, sin disco). Devuelve el `seed` usado.
+2. **`POST /generate`**:
+   * Usa el `seed` que elegiste de la preview + tus LoRAs (sin el LoRA de 2 pasos; o con el de 4 pasos si querés modo rápido).
+   * Defaults: `steps=8`, `cfg=1.0`, `sampler="euler"` (o `"er_sde"`), `scheduler="simple"`.
+   * Decode con el VAE completo (`wan_2.1_vae` / `qwen_image_vae`).
+   * Guarda/sube PNG a R2 (y/o base64) sin escribir basura en `/krea2-beam-volume/outputs`.
+3. **`POST /rescan-loras`** y **`GET /healthz`**: para detectar LoRAs nuevos que subas al Volumen `krea2-lora` sin reiniciar/redesplegar.
+
+Y en el decorador `@app.cls(...)`:
+```python
+@app.cls(
+    image=IMAGE,
+    gpu="L40S",
+    memory=32768,
+    cpu=4.0,
+    volumes=VOLUMES,
+    secrets=[R2_SECRET], # agregá acá también un API_TOKEN si usás HTTP público
+    timeout=600,
+    scaledown_window=15, # 2s si es 1-shot automático, 15-20s si mirás preview -> full
+    min_containers=0,
+    max_containers=1,
+    enable_memory_snapshot=True,
+    experimental_options={"enable_gpu_snapshot": True},
+)
+@modal.concurrent(max_inputs=1)
+```
+
+---
+
+Si querés, te armo directamente el **archivo `.py` completo, limpio y refactorizado** listo para hacer `modal deploy`. Para dejártelo exacto a tu setup, confirmame solo 3 cosas:
+1. ¿Querés que incluya la descarga/uso de **`TAE_Krea2_AcademiaSD`** (2.5 MB) para el `/preview` de 12 ms y el **`krea2_turbo_2step`** LoRA en la imagen/volumen?
+2. ¿Tu `HomoFidelis_Krea2_Turbo_BF16_v1` preferís probarlo en **`fp8_e4m3fn_fast`** (mitad de VRAM/snapshot más rápido) o mantenerlo en **`bf16`** puro?
+3. ¿Cómo vas a llamarlo: por **HTTP (FastAPI)** desde una web/app (en cuyo caso te pongo validación con `Bearer token`), o desde un script Python tuyo?

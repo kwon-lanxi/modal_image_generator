@@ -1,0 +1,23 @@
+# Krea2 Image Worker — sirve imágenes de R2 en WebP on-the-fly
+#
+# Deploy (desde la carpeta worker-img):
+#   npx wrangler deploy
+#
+# IMPORTANTE — CUENTA: este worker y el bucket "krea2-bucket-img-modal" tienen que estar
+# en la MISMA cuenta Cloudflare (la de R2). Si tenés varias cuentas, elegí la
+# correcta:  npx wrangler login  y luego  npx wrangler whoami  (o pasá
+# --account-id <id> en el deploy).
+#
+# NO hace falta custom domain: el worker funciona directo en su *.workers.dev
+# (el webp usa el patrón oficial del header Via — ver src/index.js).
+# Si después querés un dominio lindo (img.tudominio.com), se agrega en
+# Workers → krea2-img-worker → Settings → Domains (la zona tiene que estar en
+# esta misma cuenta, o delegarle el subdominio).
+name = "krea2-img-worker"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Bucket R2 con las imágenes originales
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "krea2-bucket-img-modal"

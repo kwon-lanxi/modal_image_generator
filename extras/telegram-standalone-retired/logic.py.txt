@@ -1,0 +1,67 @@
+import hashlib
+import hmac
+import json
+import math
+import re
+import shlex
+import time
+from urllib.parse import parse_qsl
+
+OWNER = 7112930476
+SIZES = {"square": (1024,1024), "cuadrado": (1024,1024), "vertical": (1024,1536), "horizontal": (1536,1024)}
+
+
+def validate_init(raw, token, now=None):
+    pairs = parse_qsl(raw, keep_blank_values=True)
+    if len(dict(pairs)) != len(pairs): raise ValueError("Duplicate fields")
+    data = dict(pairs); signature = data.pop("hash", "")
+    secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
+    expected = hmac.new(secret, "\n".join(k+"="+v for k,v in sorted(data.items())).encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected): raise ValueError("Invalid Telegram signature")
+    age = (now or time.time()) - int(data.get("auth_date", 0))
+    if not -30 <= age <= 3600: raise ValueError("Expired Telegram session; reopen Mini App")
+    user = json.loads(data.get("user", "{}"))
+    if user.get("id") != OWNER: raise ValueError("Unauthorized user")
+    return user
+
+
+def parse_prompt(text, aliases):
+    tokens = shlex.split(text)
+    prompt, loras, options = [], {}, {}
+    names = {"-w":"width", "-h":"height", "--seed":"seed", "--steps":"steps", "--cfg":"cfg", "--size":"size"}
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        if t in names:
+            i += 1
+            if i == len(tokens): raise ValueError("Falta valor para " + t)
+            options[names[t]] = tokens[i]
+        elif t.startswith("--") or t in {"-w", "-h"}: raise ValueError("Opción desconocida: " + t)
+        elif t.startswith("@"):
+            parts = t[1:].split(":")
+            if len(parts) > 2 or parts[0] not in aliases: raise ValueError("Alias desconocido: " + t)
+            entry = aliases[parts[0]]
+            weight = float(parts[1]) if len(parts)==2 else float(entry.get("weight", .8))
+            if not math.isfinite(weight) or abs(weight)>2: raise ValueError("Peso entre -2 y 2")
+            if entry["id"] in loras: raise ValueError("LoRA repetida")
+            loras[entry["id"]] = weight
+        else: prompt.append(t)
+        i += 1
+    if not prompt: raise ValueError("Escribí un prompt")
+    size = options.pop("size", "square")
+    if size not in SIZES: raise ValueError("Tamaño: square, vertical u horizontal")
+    w,h = SIZES[size]
+    recipe = {"positive_prompt":" ".join(prompt), "profile":"turbo", "width":w, "height":h, "lora":loras, "return_base64":False}
+    for key,value in options.items(): recipe[key] = float(value) if key=="cfg" else int(value)
+    if recipe["width"]%16 or recipe["height"]%16 or not 256<=recipe["width"]<=2048 or not 256<=recipe["height"]<=2048 or recipe["width"]*recipe["height"]>2097152: raise ValueError("Resolución inválida: múltiplos16, máximo2MP")
+    if len(loras)>8: raise ValueError("Máximo8 LoRAs")
+    if not 1<=recipe.get("steps",8)<=80 or not 1<=recipe.get("cfg",1)<=12 or not 0<=recipe.get("seed",0)<2**63: raise ValueError("Pasos/CFG/seed fuera de rango")
+    return recipe
+
+
+def progress_text(event):
+    if event.get("event")=="sampling.progress":
+        step,total = event["step"],event["total"]
+        n = min(10, int(step*10/total))
+        return "Krea2 · Generando\n" + "█"*n + "░"*(10-n) + f" {step}/{total} pasos"
+    return {"prepare":"Comprobando archivos", "gpu_call":"Esperando GPU / arranque / restauración", "lora":"Aplicando LoRAs", "encode":"Codificando prompt", "sampling":"Esperando primer paso", "decode":"Decodificando", "transfer_cpu":"Transfiriendo a CPU", "persist_and_upload":"Guardando en Volume y R2"}.get(event.get("stage"), "Procesando trabajo")

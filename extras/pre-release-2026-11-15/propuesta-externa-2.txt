@@ -1,0 +1,96 @@
+Excelente, con esos tres datos ya tenés el diseño prácticamente cerrado y súper optimizado. Acá va cómo resolver cada punto de forma limpia y sin sorpresas:
+
+---
+
+### 1. Cómo pasar tu `HomoFidelis_Krea2_Turbo_BF16_v1` a `fp8_scaled` de verdad (en ~1 minuto)
+
+Seguramente antes te falló o te degradó la imagen porque convertir *todas* las capas a FP8 a ciegas rompe las capas sensibles de Krea 2 (~166 tensores de modulación, normas y proyecciones finales que **tienen que quedar en BF16/FP32**).
+
+Hoy existe una herramienta open-source en Python llamada **`pytorch-precision-converter`** que lo hace **en CPU y con poca RAM**, copiando exactamente el mapa de capas cuantizadas del archivo oficial `fp8_scaled` de `Comfy-Org/Krea-2` gracias al flag `--like`:
+
+```bash
+pip install pytorch-precision-converter
+
+precision-convert /krea2-beam-volume/diffusion_models/HomoFidelis_Krea2_Turbo_BF16_v1.safetensors \
+  -p fp8_scaled \
+  --like https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors \
+  -o /krea2-beam-volume/diffusion_models/HomoFidelis_Krea2_Turbo_fp8_scaled.safetensors
+```
+*(Ese flag `--like` solo lee la cabecera del archivo oficial en Hugging Face, no descarga los gigas completos, y aplica exactamente las mismas capas y escalas en ~30–60 segundos).*
+
+* **Bonus:** Lo podés correr **una sola vez** desde una función CPU barata en Modal montando tu volumen `krea2-volume`, y listo: pasás de ~25 GB a **~12–13 GB**, el GPU Snapshot restaura casi al doble de velocidad y ComfyUI lo carga directo con `weight_dtype="default"` usando Tensor Cores FP8 nativos de la L40S.
+* También conviene usar **`qwen3vl_4b_fp8_scaled.safetensors`** (de `Comfy-Org/Krea-2`) para el text encoder, que baja de ~8 GB a ~4.5 GB.
+
+---
+
+### 2. Preview con `TAE_Krea2_AcademiaSD` vs. tu VAE Wan 2.1 `2x` en el normal
+
+¡Qué clave haber aclarado lo del **2x**! Eso significa que estás usando **`Wan2.1-VAE-upscale2x`** a través de **`ComfyUI-VAE-Utils`**, que te entrega imágenes al doble de resolución directo desde el VAE con mucha mejor calidad y muchísimo más rápido que un upscaler ESRGAN tradicional.
+
+Así que **NO borramos `ComfyUI-VAE-Utils`**; dejamos los dos flujos bien separados:
+
+* **`/preview` (rápido y barato para testear prompts y seeds):**
+  * Sampling: **2 pasos** con `krea2_turbo_2step_rank_64_lora_comfyui.safetensors` (`cfg=1.0`, `euler`, `simple`).
+  * Decode: **`TAE_Krea2_AcademiaSD.safetensors`** (2.5 MB, ~12 ms, salida 1×).
+  * Formato: **JPEG (`quality=82`)** enviado directo por HTTP/Telegram, **sin pasar por R2 ni escribir al Volumen**.
+  * *Detalle técnico importante:* `TAE_Krea2_AcademiaSD` espera el latente normalizado `x0` de `Wan21`, mientras que `KSampler` ya devuelve el latente des-normalizado. Así que antes de decodificar con el TAE hay que pasar `model.model.latent_format.process_in(latent["samples"])` (un renglón de código) para que los colores y el contraste salgan idénticos al VAE real.
+* **`/generate` (render final):**
+  * Sampling: **8 pasos** (sin el LoRA de 2 pasos).
+  * Decode: **`ComfyUI-VAE-Utils` + tu `wan_2.1_vae` (2x)** intacto, con calidad completa.
+  * Subida a **R2** (y sin guardar copias redundantes en `/krea2-beam-volume/outputs`).
+
+---
+
+### 3. Bot de Telegram con Webhook en un Worker CPU de Modal — ¿Conviene?
+
+**Sí, para uso personal es probablemente la mejor arquitectura posible.** Por tres motivos:
+
+1. **Costo casi $0 mientras preparás todo:**
+   * En Modal ponés el bot en una función **CPU mínima (`cpu=0.25, memory=256`)** que también escala a cero. Cuando charlás con el bot, elegís LoRAs o mirás botones, la **GPU L40S ni se despierta ($0)**. (Y esos segundos de CPU entran sobrados en los créditos gratis mensuales de Modal).
+   * La L40S se prende **recién** cuando tocás Preview o Generar, y se apaga sola con `scaledown_window=15` (o `10`) cuando terminás.
+2. **Interfaz perfecta en celular y PC sin programar web:**
+   * Telegram ya te resuelve historial, galería, reenvío y botones inline debajo de cada preview:
+     * `[✨ Generar Final 2x (mismo seed)]`
+     * `[🎲 Nueva Seed]`
+     * `[🎛 Cambiar LoRAs]`
+3. **Cómo gestionar los LoRAs y optimizar todo desde el bot:**
+   * El **Worker CPU** monta el volumen `krea2-lora` en **`read_only=True`** para escanear la lista de LoRAs al instante sin prender ninguna GPU.
+   * Comando `/loras` (o `/loras mingyu`): te muestra botones paginados para activar/desactivar LoRAs y tocar su fuerza (`0.6` / `0.8` / `1.0`). Tu selección actual se guarda en un **`modal.Dict`** (base clave-valor incluida gratis en Modal, por tu `user_id`), y también podés usar tags en el texto tipo `<lora:mingyu:0.8>`.
+   * **Seguridad total:** En el webhook CPU verificás dos cosas: que el header `X-Telegram-Bot-Api-Secret-Token` coincida con tu secreto y que `message.from.id == TU_TELEGRAM_ID`. Nadie más puede gastar un solo centavo de tu GPU.
+
+#### ⚠️ Cuidado crítico con los Webhooks de Telegram (para no pagar doble GPU)
+Telegram espera que el webhook devuelva `200 OK` en pocos segundos. Si lo dejás esperando mientras se despierta la GPU, **Telegram cree que dio timeout y te reintenta el mismo mensaje 3 o 4 veces** → te dispara 3 generaciones seguidas en la GPU.
+
+**Cómo evitarlo (patrón obligatorio en Modal):**
+1. El **Webhook CPU** recibe el mensaje, valida tu ID, responde un mensaje en Telegram (`"⏳ Generando preview..."`), llama a **`gpu_worker.generate_and_reply.spawn(...)`** (asíncrono, no bloqueante) y devuelve `200 OK` a Telegram en **< 100 ms**.
+2. El **Worker GPU** corre la generación, y al terminar hace el `POST` directo a `api.telegram.org/bot<TOKEN>/sendPhoto` enviándote la foto con los botones inline (ej. guardando en `callback_data` o `modal.Dict` el `seed`, `prompt` y `loras` usados para que el botón *"Generar Final"* reproduzca la composición exacta).
+
+---
+
+### 4. Cómo sumar `Krea 2 RAW` (`fp8_scaled`) cuando quieras usarlo
+
+En `Comfy-Org/Krea-2` ya está publicado **`krea2_raw_fp8_scaled.safetensors`** (~7–12 GB). Para poder alternar entre **Turbo** y **RAW** en el mismo worker sin complicaciones:
+
+1. **Perfiles automáticos en el payload (`mode: "turbo"` vs `mode: "raw"`):**
+   * **`turbo`** (tu `HomoFidelis_Krea2_Turbo_fp8_scaled` o `krea2_turbo_fp8_scaled`):
+     * `steps = 8` (o `2` en preview), `cfg = 1.0`, `sampler = "euler"` / `"er_sde"`, `scheduler = "simple"`, `mu = 1.15` fijo. `negative_prompt` no se evalúa (`cfg=1.0`).
+   * **`raw`** (`krea2_raw_fp8_scaled`):
+     * `steps = 40–52`, `cfg = 3.5` (acá **sí** se codifica y usa `negative_prompt`), `sampler = "euler"`, `scheduler = "simple"`, resolución recomendada hasta ~1K (`1024×1024`), y **`shift` dinámico según resolución** (`0.5` en 256×256 hasta `1.15` en 1280×1280).
+2. **Cómo conviven en el GPU Snapshot:**
+   * En `@modal.enter(snap=True)` dejás precargado el modelo que más uses (ej. Turbo `fp8_scaled` + `qwen3vl_4b_fp8_scaled` + VAE), y mantenés `LRU_UNET = 1`.
+   * Cuando le pedís al bot cambiar a `/model raw`, el worker descarga Turbo de VRAM y carga `krea2_raw_fp8_scaled` desde el Volumen (en Modal los Volúmenes leen a ~1–2 GB/s, son solo unos pocos segundos).
+3. **Truco para preview rápida cuando usás RAW:**
+   * Podés correr **RAW + el LoRA oficial `krea2_turbo_lora_rank_64_bf16.safetensors`** (peso `0.6–0.8`, `8–12 steps`, `cfg=1.0`) como preview intermedia rápida de RAW, o iterar la idea con `turbo` + `2step` y después pasar el prompt final a `raw`. (Los LoRAs entrenados en RAW funcionan bien en ambos, aunque la `seed` entre RAW y Turbo no da exactamente los mismos píxeles).
+
+---
+
+### ¿Te armo el proyecto listo para desplegar?
+
+Si te sirve, en el próximo mensaje te escribo los **archivos completos, limpios y comentados**:
+1. **`convert_fp8.py`** (un script cortito de Modal CPU para convertir tu `HomoFidelis_Krea2_Turbo_BF16_v1` a `fp8_scaled` directo dentro de tu Volumen en 1 minuto).
+2. **`krea2_app.py`** (un único archivo de Modal con:
+   * la clase GPU `Krea2GPU` optimizada con GPU Snapshot, `fp8_scaled`, `TAE_Krea2_AcademiaSD` para `/preview`, `ComfyUI-VAE-Utils` 2× para `/generate`, soporte `turbo`/`raw` y caché de LoRAs corregido;
+   * los endpoints HTTP con `Bearer token` por si también querés llamarlo por API;
+   * y el **Bot de Telegram** en un worker CPU barato con `.spawn()`, menú `/loras`, `/mode` (`turbo`/`raw`), botón de preview → botón de generar 2× con la misma seed).
+
+Confirmame si querés **todo junto en un solo `krea2_app.py`** (más cómodo para `modal deploy`) y si tenés ya descargados `TAE_Krea2_AcademiaSD.safetensors` y `krea2_turbo_2step_rank_64_lora_comfyui.safetensors` o querés que la imagen/script los baje automáticamente de Hugging Face al Volumen.
