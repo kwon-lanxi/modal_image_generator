@@ -23,7 +23,7 @@ Las carpetas de Krea, Qwen y MOSS contienen su propia app Modal, API, código GP
 Cloná el repositorio y configurá el CLI de Modal con tu propia sesión:
 
 ```bash
-git clone https://github.com/kwon-lanxi/modal_image_generator.git
+git clone --branch codex/initial-project-import https://github.com/kwon-lanxi/modal_image_generator.git
 cd modal_image_generator
 python -m pip install modal
 modal setup
