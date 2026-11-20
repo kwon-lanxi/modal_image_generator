@@ -33,7 +33,10 @@ def validate_init(raw, token, now=None):
 
 
 def parse_prompt(text, aliases, model_aliases=None):
-    tokens = shlex.split(text)
+    try:
+        tokens = shlex.split(text)
+    except ValueError:
+        raise ValueError('Hay comillas sin cerrar. Usá comillas dobles para valores con espacios, por ejemplo --neg "texto negativo".') from None
     prompt, loras, options = [], {}, {}
     names = {"-w":"width", "-h":"height", "--seed":"seed", "--steps":"steps", "--cfg":"cfg", "--n":"n", "--vae":"vae_alias", "--size":"size", "--model":"unet_name", "--profile":"profile", "--neg":"negative_prompt"}
     i = 0
@@ -41,22 +44,28 @@ def parse_prompt(text, aliases, model_aliases=None):
         t = tokens[i]
         if t in names:
             i += 1
-            if i == len(tokens): raise ValueError("Falta valor para " + t)
+            if i == len(tokens) or tokens[i] in names or tokens[i].startswith("--"):
+                raise ValueError(f"Falta el valor de {t}.")
+            if names[t] in options: raise ValueError(f"El parámetro {t} está repetido; dejalo una sola vez.")
             options[names[t]] = tokens[i]
-        elif t.startswith("--") or t in {"-w", "-h"}: raise ValueError("Opción desconocida: " + t)
+        elif t.startswith("--") or t in {"-w", "-h"}: raise ValueError(f"Opción desconocida: {t}. Consultá /help para ver los flags válidos.")
         elif t.startswith(("!", "@")):
             parts = t[1:].split(":")
-            if len(parts) > 2 or parts[0] not in aliases: raise ValueError("Alias desconocido: " + t)
+            if len(parts) > 2 or parts[0] not in aliases:
+                raise ValueError(f"No encontré la LoRA {parts[0]!r}. Revisá /loras y usá !alias o !alias:0.8.")
             entry = aliases[parts[0]]
-            weight = float(parts[1]) if len(parts)==2 else float(entry.get("weight", .8))
-            if not math.isfinite(weight) or abs(weight)>2: raise ValueError("Peso entre -2 y 2")
+            if not isinstance(entry,dict) or not entry.get("id"):
+                raise ValueError(f"El alias !{parts[0]} no tiene una LoRA asignada. Corregilo desde /loras.")
+            try: weight = float(parts[1]) if len(parts)==2 else float(entry.get("weight", .8))
+            except (TypeError, ValueError): raise ValueError(f"Peso inválido en !{parts[0]}; usá un número, por ejemplo !{parts[0]}:0.8.") from None
+            if not math.isfinite(weight) or abs(weight)>2: raise ValueError(f"Peso inválido para !{parts[0]}: debe estar entre -2 y 2.")
             if entry["id"] in loras: raise ValueError("LoRA repetida")
             loras[entry["id"]] = weight
         else: prompt.append(t)
         i += 1
     if not prompt: raise ValueError("Escribí un prompt")
     size = options.pop("size", "1:1")
-    if size not in SIZES: raise ValueError("Proporciones: " + ", ".join(ASPECT_RATIOS))
+    if size not in SIZES: raise ValueError(f"--size {size!r} no es válido. Elegí: " + ", ".join(ASPECT_RATIOS))
     w,h = SIZES[size]
     recipe = {"positive_prompt":" ".join(prompt), "profile":"turbo", "width":w, "height":h, "lora":loras, "return_base64":False}
     model_name=options.get("unet_name")
@@ -66,22 +75,29 @@ def parse_prompt(text, aliases, model_aliases=None):
     vae_alias=options.pop("vae_alias",None)
     if vae_alias:
         from krea_service.config import VAE_ALIASES
-        if vae_alias.lower() not in VAE_ALIASES:raise ValueError("Alias VAE desconocido")
+        if vae_alias.lower() not in VAE_ALIASES:raise ValueError(f"VAE {vae_alias!r} no reconocido. Elegí base, wanx2, realvae o HDvae.")
         recipe["vae_name"]=VAE_ALIASES[vae_alias.lower()]
     for key,value in options.items():
         if key in {"unet_name", "profile", "negative_prompt"}:
             recipe[key] = value
-        elif key == "cfg":
-            recipe[key] = float(value)
         else:
-            recipe[key] = int(value)
-    if recipe["width"]%16 or recipe["height"]%16 or not 256<=recipe["width"]<=2048 or not 256<=recipe["height"]<=2048 or recipe["width"]*recipe["height"]>2097152: raise ValueError("Resolución inválida: múltiplos16, máximo2MP")
+            flag = next((name for name,field in names.items() if field==key),key)
+            try: recipe[key] = float(value) if key == "cfg" else int(value)
+            except (TypeError, ValueError):
+                expected = "un número" if key == "cfg" else "un entero"
+                raise ValueError(f"{flag} debe ser {expected}; recibí {value[:48]!r}.") from None
+    if recipe.get("profile") not in {"turbo", "turbo-scaled", "raw"}:
+        raise ValueError("--profile debe ser turbo, turbo-scaled o raw.")
+    if recipe["width"]%16 or recipe["height"]%16 or not 256<=recipe["width"]<=2048 or not 256<=recipe["height"]<=2048 or recipe["width"]*recipe["height"]>2097152:
+        raise ValueError(f"Resolución -w {recipe['width']} -h {recipe['height']} inválida: ambos valores deben ser múltiplos de 16, estar entre 256 y 2048 y no superar 2 MP.")
     if len(loras)>8: raise ValueError("Máximo8 LoRAs")
     default_cfg = 3.5 if recipe.get("profile") == "raw" else 1.0
     if recipe.get("negative_prompt", "").strip() and recipe.get("cfg", default_cfg) <= 1:
         raise ValueError("--neg requiere CFG mayor que 1; usa --profile raw o indica --cfg > 1")
-    if not 1<=recipe.get("steps",8)<=80 or not 1<=recipe.get("cfg",1)<=12 or not 0<=recipe.get("seed",0)<2**63: raise ValueError("Pasos/CFG/seed fuera de rango")
-    if not 1<=recipe.get("n",1)<=8:raise ValueError("--n admite entre1 y8")
+    if not 1<=recipe.get("steps",8)<=80: raise ValueError("--steps debe estar entre 1 y 80.")
+    if not 1<=recipe.get("cfg",1)<=12: raise ValueError("--cfg debe estar entre 1 y 12.")
+    if not 0<=recipe.get("seed",0)<2**63: raise ValueError("--seed debe estar entre 0 y 2^63-1.")
+    if not 1<=recipe.get("n",1)<=8:raise ValueError("--n admite entre 1 y 8 imágenes.")
     return recipe
 
 

@@ -239,8 +239,29 @@ def draft(chat,recipe,source_message_id=None):
           "source_message_id":source_message_id,"confirmation_id":message["message_id"]})
 
 
-def handle(update):
+def validated_prompt(text):
     from tg_logic import parse_prompt
+    aliases=state("get","aliases",{})
+    model_aliases=state("get","model_aliases",{})
+    recipe=parse_prompt(text,aliases,model_aliases)
+    if "--model" in text.split():
+        model_id=recipe.get("unet_name")
+        available={value for item in model_catalog() if isinstance(item,dict)
+                   for value in (item.get("id"),item.get("name"),item.get("filename")) if value}
+        if model_id not in available:
+            raise ValueError(f"No encontré el modelo {model_id!r} en el volumen. Revisá /modelos y copiá un alias o ID válido.")
+    selected=set(recipe.get("lora",{}))
+    if selected:
+        available={item.get("id") for item in lora_catalog() if isinstance(item,dict)}
+        missing=[name for name,item in aliases.items()
+                 if isinstance(item,dict) and item.get("id") in selected and item.get("id") not in available]
+        if missing:
+            names=", ".join("!"+name for name in missing[:6])
+            raise ValueError(f"La LoRA de {names} ya no está en el volumen. Abrí /loras para quitar o corregir ese alias.")
+    return recipe
+
+
+def handle(update):
     callback=update.get("callback_query")
     if callback:
         try: tg("answerCallbackQuery",callback_query_id=callback["id"])
@@ -330,7 +351,7 @@ def handle(update):
     if command and command not in {"/generar","/descargar"}:
         send(chat,"Comando desconocido. Abrí el menú o /help");return
     if command=="/generar":text=text[len("/generar"):].strip()
-    draft(chat,parse_prompt(text,state("get","aliases",{}),state("get","model_aliases",{})),msg.get("message_id"))
+    draft(chat,validated_prompt(text),msg.get("message_id"))
 
 
 def notify_progress(job,event):
@@ -529,10 +550,17 @@ def telegram_process():
         queued=max(0,time.time()-entry.get("received_at",time.time()))
         entry["status"]="handling";state("put",k,entry)
         try:handle(entry["update"])
+        except ValueError as exc:
+            print(json.dumps({"event":"telegram.validation.failed","update_key":k,"error":"ValueError"}))
+            msg=entry["update"].get("message",{})
+            detail=str(exc).strip()[:500] or "Formato no válido."
+            if msg.get("chat"):
+                send(msg["chat"]["id"],f"No pude validar el mensaje.\n{detail}\n\nCorregí ese punto y reenviá el mensaje. /help")
         except Exception as exc:
             print(json.dumps({"event":"telegram.update.failed","update_key":k,"error":type(exc).__name__}))
             msg=entry["update"].get("message",{})
-            if msg.get("chat"):send(msg["chat"]["id"],"Revisá alias, pesos y parámetros. /help")
+            if msg.get("chat"):
+                send(msg["chat"]["id"],"No pude procesar el mensaje por un error interno; no se creó el trabajo. Reintentá y, si persiste, consultá /estado.")
         entry["status"]="done";state("put",k,entry)
         print(json.dumps({"event":"telegram.update.handled","update_key":k,
                           "queue_seconds":round(queued,3),"seconds":round(time.perf_counter()-started,3)}))
