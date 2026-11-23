@@ -136,3 +136,14 @@ En lotes `n>1`, cada imagen obtiene una semilla aleatoria criptográfica mediant
 ## Progreso de descargas en Telegram (Qwen)
 
 Durante /descargar y /descargar_modelo el bot edita el mensaje temporal cada vez que avanza la descarga. Muestra porcentaje, cantidad descargada, tamaño total y velocidad en MB/GB; al terminar, el mensaje de progreso se limpia y queda la confirmación habitual. Los logs estructurados conservan también los bytes exactos.
+
+
+## Entrega de lotes y descargas (actualización 2026-11-22)
+
+Los lotes se envían en un álbum con copias JPEG de hasta 1600 px y calidad 88, preparadas en CPU con hasta tres lecturas concurrentes. Los originales PNG y sus metadatos permanecen en R2/Volume y en Biblioteca. Los reenvíos del álbum reutilizan file_id. Los logs `telegram.album.prepare` permiten comparar bytes originales, bytes enviados y tiempo de preparación; `telegram.http` mide el envío real. La CPU del bot dispone de 0.5 cores y 1 GiB, con escala a cero.
+
+`/descargar_modelo ENLACE [nombre]` descarga checkpoints en CPU a diffusion_models, con el mismo progreso y fuentes HF/Civitai que las LoRAs. `/descargar` sigue descargando LoRAs.
+
+## Edición explícita por respuesta
+
+El nuevo flujo reemplaza la selección persistente anterior. Un prompt sin respuesta genera desde texto aunque hayas enviado fotos antes. Respondé a una foto o a cualquier elemento de un álbum con la instrucción (opcionalmente `/editar`). Se usa ese álbum completo, sin mezclar otros. También podés enviar una imagen/álbum con caption: crea la confirmación de edición con ese texto. Los elementos tardíos del álbum se vuelven a leer antes de preparar referencias en CPU. Podés responder a álbumes generados por el bot tras esta actualización. `/referencias` muestra ayuda del flujo y `/limpiar` ya no es necesario para generar desde texto.

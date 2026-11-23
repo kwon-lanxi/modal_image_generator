@@ -272,7 +272,7 @@ def reference_key(chat):return "references:"+str(chat)
 
 
 def receive_media(msg):
-    """Collect an album without guessing when its last update will arrive."""
+    """Keep each photo/album separate; receiving one never activates global editing."""
     chat=msg["chat"]["id"]
     if msg.get("photo"):
         media=max(msg["photo"],key=lambda v:v["width"]*v["height"])
@@ -281,26 +281,39 @@ def receive_media(msg):
         if media.get("mime_type") not in {"image/png","image/jpeg","image/webp"}:
             raise ValueError("Enviar fotos o archivos PNG/JPEG/WebP")
     if not media.get("file_id") or media.get("file_size",0)>16*1024*1024:
-        raise ValueError("Máximo16MiB por imagen")
-    session=state("get",reference_key(chat),{"items":[]})
+        raise ValueError("Máximo 16 MiB por imagen")
+    group="media:"+str(chat)+":"+str(msg.get("media_group_id") or msg["message_id"])
+    session=state("get",group,{"items":[]})
     identity=media.get("file_unique_id") or media["file_id"]
     if not any(v["identity"]==identity for v in session["items"]):
-        if len(session["items"])>=10:raise ValueError("Máximo10referencias; /limpiar para comenzar otra selección")
-        session["items"].append({"identity":identity,"file_id":media["file_id"],"message_id":msg["message_id"]})
+        if len(session["items"])>=10:raise ValueError("Máximo 10 referencias por álbum")
+        session["items"].append({"identity":identity,"file_id":media["file_id"],
+                                 "message_id":msg["message_id"],"group_key":group})
         session["items"].sort(key=lambda v:v["message_id"])
-    if msg.get("caption"):session["caption"]=msg["caption"]
-    state("put",reference_key(chat),session)
-    _refs_changed.add(chat)
+    if msg.get("caption"):
+        session.update(caption=msg["caption"],source_message_id=msg["message_id"])
+    state("put",group,session)
+    state("put","media-message:"+str(chat)+":"+str(msg["message_id"]),group)
+    state("put",reference_key(chat),{"group_key":group})
+    _refs_changed.add((chat,group))
+    return group
+
+
+def reply_references(msg):
+    reply=msg.get("reply_to_message") or {}
+    if not reply:return []
+    chat=msg["chat"]["id"]
+    group=state("get","media-message:"+str(chat)+":"+str(reply.get("message_id")))
+    if not group and (reply.get("photo") or reply.get("document")):
+        group=receive_media({**reply,"chat":msg["chat"],"caption":""})
+    if not group:
+        raise ValueError("Respondé a una foto o a una imagen del álbum que quieras editar.")
+    return state("get",group,{"items":[]})["items"]
 
 
 def show_references(chat):
-    session=state("get",reference_key(chat),{"items":[]})
-    text=f"{len(session['items'])}/10 imágenes seleccionadas.\nEnviá la instrucción con /generar, o /editar para usar la descripción del álbum.\nQuedan activas hasta /limpiar."
-    if session.get("notice_id"):
-        tg("editMessageText",chat_id=chat,message_id=session["notice_id"],text=text)
-    else:
-        session["notice_id"]=send(chat,text)["message_id"]
-        state("put",reference_key(chat),session)
+    send(chat,"Para editar, respondé a una foto o a cualquier imagen de su álbum con la instrucción. También podés enviar una foto con caption. Un mensaje sin respuesta genera desde texto.")
+
 
 
 def prepare_inputs(job,payload,operation,backend):
@@ -311,7 +324,10 @@ def prepare_inputs(job,payload,operation,backend):
     if operation not in {"generate","edit"} or payload.get("input_images"):
         return payload,operation
     images=[]
-    for ref in job.get("telegram_inputs",[]):
+    refs=job.get("telegram_inputs",[])
+    if refs and refs[0].get("group_key"):
+        refs=state("get",refs[0]["group_key"],{"items":refs})["items"]
+    for ref in refs:
         info=tg("getFile",file_id=ref["file_id"])
         if info.get("file_size",0)>MAX_INPUT_BYTES:raise ValueError("Máximo16MiB por imagen")
         path=info.get("file_path","")
@@ -381,7 +397,7 @@ def handle(update):
         send(chat,"Referencias quitadas. El próximo prompt generará desde texto.");return
     if command=="/referencias":show_references(chat);return
     if command in {"/start","/help","/loras"}:
-        send(chat,"Qwen 2.1 personal\nPrompt !alias:0.8 --model alias --size 9:16 --n 4\n--turbo activa Viggle v0.3, 6 pasos y CFG1 · --neg \"texto negativo\" requiere CFG > 1\nProporciones: 1:1 · 16:9 · 9:16 · 4:3 · 3:4 · 3:2 · 2:3\n-w 896 -h 1152 --seed 42 --steps 25 --cfg 1 --ref 768\n/descargar ENLACE nombre\n/convertir_modelo --model alias --fp8-scaled (o --fp8-mixed)\nEnviá hasta10fotos/archivos y después la instrucción. /editar usa la descripción del álbum. /limpiar quita referencias. Modelos y alias se editan en Biblioteca > Modelos. Cada generación pide confirmación.",library())
+        send(chat,"Qwen 2.1 personal\nPrompt !alias:0.8 --model alias --size 9:16 --n 4\n--turbo activa Viggle v0.3, 6 pasos y CFG1 · --neg \"texto negativo\" requiere CFG > 1\nProporciones: 1:1 · 16:9 · 9:16 · 4:3 · 3:4 · 3:2 · 2:3\n-w 896 -h 1152 --seed 42 --steps 25 --cfg 1 --ref 768\n/descargar ENLACE nombre\n/descargar_modelo ENLACE nombre\n/convertir_modelo --model alias --fp8-scaled (o --fp8-mixed)\nRespondé a una foto o álbum con la instrucción para editar. También acepta foto con caption. Sin respuesta genera desde texto. Modelos y alias se editan en Biblioteca > Modelos. Cada generación pide confirmación.",library())
         return
     if command=="/modelos":
         send(chat,"Administrá alias, conversiones FP8 y checkpoints.",library("models"));return
@@ -397,11 +413,11 @@ def handle(update):
         jobs=state("list","job:")
         lines=[k[4:]+" · "+v["status"] for k,v in list(jobs.items())[:10]]
         send(chat,"Últimos trabajos\n"+"\n".join(lines),library());return
-    if text.startswith("/descargar "):
+    if command in {"/descargar","/descargar_modelo"}:
         import shlex
         words=shlex.split(text)
         if not 2<=len(words)<=3: raise ValueError("/descargar ENLACE [nombre]")
-        data={"url":words[1],"target":"lora"}
+        data={"url":words[1],"target":"unet" if command=="/descargar_modelo" else "lora"}
         if len(words)==3:data["name"]=words[2]
         key=uuid.uuid4().hex[:16]
         state("put","job:"+key,{"status":"ready","chat":chat,"operation":"download","recipe":data});return
@@ -434,10 +450,10 @@ def handle(update):
     if command and command not in {"/generar","/editar","/descargar"}:
         send(chat,"Comando desconocido. Abrí el menú o /help");return
     if command in {"/generar","/editar"}:text=text[len(command):].strip()
-    session=state("get",reference_key(chat),{"items":[]})
-    if command=="/editar" and not text:text=session.get("caption","")
-    if command=="/editar" and not session["items"]:raise ValueError("Primero enviá imágenes")
-    draft(chat,validated_prompt(text),msg.get("message_id"),session["items"])
+    references=reply_references(msg)
+    if command=="/editar" and not references:
+        raise ValueError("Respondé a la foto o al álbum con /editar y tu instrucción.")
+    draft(chat,validated_prompt(text),msg.get("message_id"),references)
 
 
 def notify_progress(job,event):
@@ -468,15 +484,31 @@ def deliver_album(key,job):
     cached=job.get("telegram_album_file_ids",[])
     media=[];files={}
     seeds=[str(item.get("seed_string",item.get("seed"))) for item in result["batch"]]
+    prepared=[]
+    if not (len(cached)==len(images) and all(cached)):
+        from concurrent.futures import ThreadPoolExecutor
+        from io import BytesIO
+        from PIL import Image, ImageOps
+        def prepare(image):
+            started=time.perf_counter()
+            raw=api("GET","/serve_image?filename="+quote(image["filename"],safe="")).content
+            with Image.open(BytesIO(raw)) as original:
+                photo=ImageOps.exif_transpose(original).convert("RGB")
+                photo.thumbnail((1600,1600),Image.Resampling.LANCZOS)
+                output=BytesIO()
+                photo.save(output,format="JPEG",quality=88)
+            data=output.getvalue()
+            print(json.dumps({"event":"telegram.album.prepare","original_bytes":len(raw),
+                              "upload_bytes":len(data),"seconds":round(time.perf_counter()-started,3)}))
+            return data
+        with ThreadPoolExecutor(max_workers=min(3,len(images))) as pool:
+            prepared=list(pool.map(prepare,images))
     for index,image in enumerate(images):
         if len(cached)==len(images) and all(cached):
             source=cached[index]
         else:
-            raw=api("GET","/serve_image?filename="+quote(image["filename"],safe="")).content
-            # Verify actual bytes too, before any Telegram delivery.
-            if len(raw)>=ALBUM_IMAGE_LIMIT_BYTES:return False
             name="image"+str(index)
-            files[name]=(image["filename"],raw,"image/png")
+            files[name]=(Path(image["filename"]).stem+".jpg",prepared[index],"image/jpeg")
             source="attach://"+name
         item={"type":"photo","media":source}
         if index==0:item["caption"]="\n".join(seeds)
@@ -500,6 +532,15 @@ def deliver_album(key,job):
     job.update(status="done",delivery_method="telegram_album",
                telegram_album_file_ids=[item.get("photo",[{}])[-1].get("file_id") for item in delivered],
                output_message_ids=[item["message_id"] for item in delivered])
+    group="media:"+str(job["chat"])+":output:"+key
+    refs=[]
+    for message in delivered:
+        photo=(message.get("photo") or [{}])[-1]
+        if photo.get("file_id"):
+            refs.append({"identity":photo.get("file_unique_id",photo["file_id"]),
+                         "file_id":photo["file_id"],"message_id":message["message_id"],"group_key":group})
+            state("put","media-message:"+str(job["chat"])+":"+str(message["message_id"]),group)
+    state("put",group,{"items":refs})
     state("put","job:"+key,job)
     # Albums cannot carry inline keyboards. Reuse our existing status message.
     markup=buttons([[button("Repetir","repeat:"+key),button("Nueva variante","vary:"+key)],
@@ -520,8 +561,7 @@ def deliver(key,job,raw=None):
             raise RuntimeError("Consultar entrega pendiente del álbum antes de reenviar")
         # Older partial deliveries must continue individually, avoiding duplicates.
         partial=any(state("get","job:"+key+"_"+str(i)) for i in range(len(result["images"])))
-        if (not partial and all(0<image.get("size_bytes",0)<ALBUM_IMAGE_LIMIT_BYTES for image in result["images"])
-                and deliver_album(key,job)):
+        if not partial and deliver_album(key,job):
             return
         for index,image in enumerate(result["images"]):
             child_key=key+"_"+str(index)
@@ -656,9 +696,18 @@ def telegram_process():
             try:advance(key[4:],job)
             except Exception as exc:print(json.dumps({"event":"telegram.dispatch.failed","job":key,"error":type(exc).__name__}))
     while _refs_changed:
-        chat=_refs_changed.pop()
-        try:show_references(chat)
-        except Exception as exc:print(json.dumps({"event":"telegram.references.notice_failed","error":type(exc).__name__}))
+        chat,group=_refs_changed.pop()
+        session=state("get",group,{"items":[]})
+        if session.get("caption") and not session.get("caption_consumed"):
+            try:
+                text=session["caption"]
+                if text.startswith(("/editar ","/generar ")):text=text.split(maxsplit=1)[1]
+                draft(chat,validated_prompt(text),session.get("source_message_id"),session["items"])
+            except ValueError as exc:
+                send(chat,"No pude validar el caption: "+str(exc)[:500])
+            session["caption_consumed"]=True
+            state("put",group,session)
+
 
 
 def telegram_web():
@@ -770,7 +819,7 @@ def telegram_web():
 def telegram_configure(url):
     from qwen_tg_logic import OWNER
     me=tg("getMe")
-    commands=[{"command":k,"description":v} for k,v in [("generar","Generar o editar con referencias"),("editar","Editar con el texto o la descripción"),("referencias","Ver imágenes seleccionadas"),("limpiar","Quitar las referencias activas"),("loras","Biblioteca de LoRAs y alias"),("modelos","Administrar modelos y alias"),("convertir_modelo","Convertir un checkpoint a FP8"),("galeria","Imágenes y recetas"),("estado","Consultar trabajo actual"),("trabajos","Últimos trabajos"),("descargar","Descargar una LoRA por enlace"),("help","Ayuda y parámetros")]]
+    commands=[{"command":k,"description":v} for k,v in [("generar","Generar o editar con referencias"),("editar","Editar con el texto o la descripción"),("referencias","Ver imágenes seleccionadas"),("limpiar","Quitar las referencias activas"),("loras","Biblioteca de LoRAs y alias"),("modelos","Administrar modelos y alias"),("convertir_modelo","Convertir un checkpoint a FP8"),("galeria","Imágenes y recetas"),("estado","Consultar trabajo actual"),("trabajos","Últimos trabajos"),("descargar","Descargar una LoRA por enlace"),("descargar_modelo","Descargar un checkpoint"),("help","Ayuda y parámetros")]]
     tg("setMyCommands",commands=commands)
     tg("setChatMenuButton",menu_button={"type":"web_app","text":"Biblioteca","web_app":{"url":url.rstrip("/")+"/mini"}})
     result=tg("setWebhook",url=url.rstrip("/")+"/webhook",secret_token=os.environ["TELEGRAM_WEBHOOK_SECRET"],allowed_updates=["message","callback_query"],max_connections=2,drop_pending_updates=False)
@@ -820,10 +869,10 @@ def telegram_network_diagnostics():
 def register(app,image):
     global TelegramState,telegram_process,telegram_web,telegram_configure,telegram_diagnostics,telegram_redeliver,telegram_network_diagnostics
     credentials=[modal.Secret.from_name("tg-token-image"),modal.Secret.from_name("qwen21-telegram-config")]
-    TelegramState=app.cls(image=image,volumes={"/state":volume},cpu=.125,memory=256,max_containers=1,scaledown_window=2)(modal.concurrent(max_inputs=1)(TelegramState))
-    telegram_process=app.function(image=image,region="eu-west",secrets=credentials,cpu=.125,memory=256,max_containers=1,scaledown_window=2,timeout=120,retries=0)(telegram_process)
-    telegram_web=app.function(image=image,region="eu-west",secrets=credentials,cpu=.125,memory=256,max_containers=1,scaledown_window=2)(modal.concurrent(max_inputs=16)(modal.asgi_app()(telegram_web)))
-    telegram_configure=app.function(image=image,region="eu-west",secrets=credentials,cpu=.125,memory=256)(telegram_configure)
-    telegram_diagnostics=app.function(image=image,region="eu-west",secrets=credentials,cpu=.125,memory=256)(telegram_diagnostics)
-    telegram_redeliver=app.function(image=image,region="eu-west",secrets=credentials,cpu=.125,memory=256,scaledown_window=2,timeout=180,retries=0)(telegram_redeliver)
+    TelegramState=app.cls(image=image,volumes={"/state":volume},cpu=.5,memory=1024,max_containers=1,scaledown_window=2)(modal.concurrent(max_inputs=1)(TelegramState))
+    telegram_process=app.function(image=image,region="eu-west",secrets=credentials,cpu=.5,memory=1024,max_containers=1,scaledown_window=2,timeout=300,retries=0)(telegram_process)
+    telegram_web=app.function(image=image,region="eu-west",secrets=credentials,cpu=.5,memory=1024,max_containers=1,scaledown_window=2)(modal.concurrent(max_inputs=16)(modal.asgi_app()(telegram_web)))
+    telegram_configure=app.function(image=image,region="eu-west",secrets=credentials,cpu=.5,memory=1024)(telegram_configure)
+    telegram_diagnostics=app.function(image=image,region="eu-west",secrets=credentials,cpu=.5,memory=1024)(telegram_diagnostics)
+    telegram_redeliver=app.function(image=image,region="eu-west",secrets=credentials,cpu=.5,memory=1024,scaledown_window=2,timeout=180,retries=0)(telegram_redeliver)
     telegram_network_diagnostics=app.function(image=image,region="eu-west",secrets=credentials,cpu=.25,memory=256,scaledown_window=2,timeout=90)(telegram_network_diagnostics)

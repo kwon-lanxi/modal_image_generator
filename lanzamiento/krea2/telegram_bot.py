@@ -298,7 +298,7 @@ def handle(update):
     if command=="/galeria":
         send(chat,"Tus imágenes y recetas guardadas.",library("gallery"));return
     if command in {"/start","/help","/loras"}:
-        send(chat,"Krea2 personal\nPrompt !alias:0.8 --model alias --size 9:16 --n 4\n--profile turbo/raw elige la familia del modelo · --neg \"texto negativo\"\n--neg requiere CFG > 1 (usa --profile raw o --cfg > 1)\n--vae base/wanx2/realvae/HDvae\nProporciones: 1:1 · 16:9 · 9:16 · 4:3 · 3:4 · 3:2 · 2:3\n-w 896 -h 1152 --seed 42 --steps 8 --cfg 1\n/descargar ENLACE nombre\n/convertir_modelo --model alias --fp8-scaled (o --fp8-mixed)\nLos alias y pesos se editan en Biblioteca; los modelos, en Modelos. Cada generación pide confirmación.",library())
+        send(chat,"Krea2 personal\nPrompt !alias:0.8 --model alias --size 9:16 --n 4\n--profile turbo/raw elige la familia del modelo · --neg \"texto negativo\"\n--neg requiere CFG > 1 (usa --profile raw o --cfg > 1)\n--vae base/wanx2/realvae/HDvae\nProporciones: 1:1 · 16:9 · 9:16 · 4:3 · 3:4 · 3:2 · 2:3\n-w 896 -h 1152 --seed 42 --steps 8 --cfg 1\n/descargar ENLACE nombre\n/descargar_modelo ENLACE nombre\n/convertir_modelo --model alias --fp8-scaled (o --fp8-mixed)\nLos alias y pesos se editan en Biblioteca; los modelos, en Modelos. Cada generación pide confirmación.",library())
         return
     if command=="/modelos":
         send(chat,"Administrá alias, conversiones FP8 y checkpoints.",library("models"));return
@@ -314,11 +314,11 @@ def handle(update):
         jobs=state("list","job:")
         lines=[k[4:]+" · "+v["status"] for k,v in list(jobs.items())[:10]]
         send(chat,"Últimos trabajos\n"+"\n".join(lines),library());return
-    if text.startswith("/descargar "):
+    if command in {"/descargar","/descargar_modelo"}:
         import shlex
         words=shlex.split(text)
         if not 2<=len(words)<=3: raise ValueError("/descargar ENLACE [nombre]")
-        data={"url":words[1],"target":"lora"}
+        data={"url":words[1],"target":"unet" if command=="/descargar_modelo" else "lora"}
         if len(words)==3:data["name"]=words[2]
         key=uuid.uuid4().hex[:16]
         state("put","job:"+key,{"status":"ready","chat":chat,"operation":"download","recipe":data});return
@@ -382,15 +382,31 @@ def deliver_album(key,job):
     cached=job.get("telegram_album_file_ids",[])
     media=[];files={}
     seeds=[str(item.get("seed_string",item.get("seed"))) for item in result["batch"]]
+    prepared=[]
+    if not (len(cached)==len(images) and all(cached)):
+        from concurrent.futures import ThreadPoolExecutor
+        from io import BytesIO
+        from PIL import Image, ImageOps
+        def prepare(image):
+            started=time.perf_counter()
+            raw=api("GET","/serve_image?filename="+quote(image["filename"],safe="")).content
+            with Image.open(BytesIO(raw)) as original:
+                photo=ImageOps.exif_transpose(original).convert("RGB")
+                photo.thumbnail((1600,1600),Image.Resampling.LANCZOS)
+                output=BytesIO()
+                photo.save(output,format="JPEG",quality=88)
+            data=output.getvalue()
+            print(json.dumps({"event":"telegram.album.prepare","original_bytes":len(raw),
+                              "upload_bytes":len(data),"seconds":round(time.perf_counter()-started,3)}))
+            return data
+        with ThreadPoolExecutor(max_workers=min(3,len(images))) as pool:
+            prepared=list(pool.map(prepare,images))
     for index,image in enumerate(images):
         if len(cached)==len(images) and all(cached):
             source=cached[index]
         else:
-            raw=api("GET","/serve_image?filename="+quote(image["filename"],safe="")).content
-            # Verify actual bytes too, before any Telegram delivery.
-            if len(raw)>=ALBUM_IMAGE_LIMIT_BYTES:return False
             name="image"+str(index)
-            files[name]=(image["filename"],raw,"image/png")
+            files[name]=(Path(image["filename"]).stem+".jpg",prepared[index],"image/jpeg")
             source="attach://"+name
         item={"type":"photo","media":source}
         if index==0:item["caption"]="\n".join(seeds)
@@ -434,8 +450,7 @@ def deliver(key,job,raw=None):
             raise RuntimeError("Consultar entrega pendiente del álbum antes de reenviar")
         # Older partial deliveries must continue individually, avoiding duplicates.
         partial=any(state("get","job:"+key+"_"+str(i)) for i in range(len(result["images"])))
-        if (not partial and all(0<image.get("size_bytes",0)<ALBUM_IMAGE_LIMIT_BYTES for image in result["images"])
-                and deliver_album(key,job)):
+        if not partial and deliver_album(key,job):
             return
         for index,image in enumerate(result["images"]):
             child_key=key+"_"+str(index)
@@ -679,7 +694,7 @@ def telegram_web():
 def telegram_configure(url):
     from tg_logic import OWNER
     me=tg("getMe")
-    commands=[{"command":k,"description":v} for k,v in [("generar","Crear una imagen"),("loras","Biblioteca de LoRAs y alias"),("modelos","Administrar modelos y alias"),("convertir_modelo","Convertir un checkpoint a FP8"),("galeria","Imágenes y recetas"),("estado","Consultar trabajo actual"),("trabajos","Últimos trabajos"),("descargar","Descargar una LoRA por enlace"),("help","Ayuda y parámetros")]]
+    commands=[{"command":k,"description":v} for k,v in [("generar","Crear una imagen"),("loras","Biblioteca de LoRAs y alias"),("modelos","Administrar modelos y alias"),("convertir_modelo","Convertir un checkpoint a FP8"),("galeria","Imágenes y recetas"),("estado","Consultar trabajo actual"),("trabajos","Últimos trabajos"),("descargar","Descargar una LoRA por enlace"),("descargar_modelo","Descargar un checkpoint"),("help","Ayuda y parámetros")]]
     tg("setMyCommands",commands=commands)
     tg("setChatMenuButton",chat_id=OWNER,menu_button={"type":"web_app","text":"Biblioteca","web_app":{"url":url.rstrip("/")+"/mini"}})
     result=tg("setWebhook",url=url.rstrip("/")+"/webhook",secret_token=os.environ["TELEGRAM_WEBHOOK_SECRET"],allowed_updates=["message","callback_query"],max_connections=2,drop_pending_updates=False)
@@ -729,10 +744,10 @@ def telegram_network_diagnostics():
 def register(app,image):
     global TelegramState,telegram_process,telegram_web,telegram_configure,telegram_diagnostics,telegram_redeliver,telegram_network_diagnostics
     credentials=[modal.Secret.from_name("tg-token-image"),modal.Secret.from_name("krea2-telegram-config")]
-    TelegramState=app.cls(image=image,volumes={"/state":volume},cpu=.125,memory=256,max_containers=1,scaledown_window=2)(modal.concurrent(max_inputs=1)(TelegramState))
-    telegram_process=app.function(image=image,region="eu-west",secrets=credentials,cpu=.125,memory=256,max_containers=1,scaledown_window=2,timeout=120,retries=0)(telegram_process)
-    telegram_web=app.function(image=image,region="eu-west",secrets=credentials,cpu=.125,memory=256,max_containers=1,scaledown_window=2)(modal.concurrent(max_inputs=16)(modal.asgi_app()(telegram_web)))
-    telegram_configure=app.function(image=image,region="eu-west",secrets=credentials,cpu=.125,memory=256)(telegram_configure)
-    telegram_diagnostics=app.function(image=image,region="eu-west",secrets=credentials,cpu=.125,memory=256)(telegram_diagnostics)
-    telegram_redeliver=app.function(image=image,region="eu-west",secrets=credentials,cpu=.125,memory=256,scaledown_window=2,timeout=180,retries=0)(telegram_redeliver)
+    TelegramState=app.cls(image=image,volumes={"/state":volume},cpu=.5,memory=1024,max_containers=1,scaledown_window=2)(modal.concurrent(max_inputs=1)(TelegramState))
+    telegram_process=app.function(image=image,region="eu-west",secrets=credentials,cpu=.5,memory=1024,max_containers=1,scaledown_window=2,timeout=300,retries=0)(telegram_process)
+    telegram_web=app.function(image=image,region="eu-west",secrets=credentials,cpu=.5,memory=1024,max_containers=1,scaledown_window=2)(modal.concurrent(max_inputs=16)(modal.asgi_app()(telegram_web)))
+    telegram_configure=app.function(image=image,region="eu-west",secrets=credentials,cpu=.5,memory=1024)(telegram_configure)
+    telegram_diagnostics=app.function(image=image,region="eu-west",secrets=credentials,cpu=.5,memory=1024)(telegram_diagnostics)
+    telegram_redeliver=app.function(image=image,region="eu-west",secrets=credentials,cpu=.5,memory=1024,scaledown_window=2,timeout=180,retries=0)(telegram_redeliver)
     telegram_network_diagnostics=app.function(image=image,region="eu-west",secrets=credentials,cpu=.25,memory=256,scaledown_window=2,timeout=90)(telegram_network_diagnostics)

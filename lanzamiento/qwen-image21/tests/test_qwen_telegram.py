@@ -211,32 +211,34 @@ def test_album_collects_in_order_without_generating_on_caption(monkeypatch):
     db={};memory(monkeypatch,db)
     monkeypatch.setattr(bot,'_refs_changed',set())
     monkeypatch.setattr(bot,'draft',lambda *a:pytest.fail('No auto generate partial album'))
-    for msg in [photo(12,'b'),photo(11,'a','combine the two'),photo(12,'b')]:bot.handle({'message':msg})
-    session=db[bot.reference_key(OWNER)]
+    for msg in [photo(12,'b'),photo(11,'a','combine the two'),photo(12,'b')]:bot.handle({'message':{**msg,'media_group_id':'album'}})
+    group=db[bot.reference_key(OWNER)]['group_key']
+    session=db[group]
     assert [r['file_id'] for r in session['items']]==['a','b']
     assert session['caption']=='combine the two'
-    assert bot._refs_changed=={OWNER}
+    assert bot._refs_changed=={(OWNER,group)}
 
 
 def test_document_images_and_reference_limits(monkeypatch):
     db={};memory(monkeypatch,db);monkeypatch.setattr(bot,'_refs_changed',set())
-    msg={'chat':{'id':OWNER},'message_id':1,'document':{'file_id':'png','mime_type':'image/png'}}
+    msg={'chat':{'id':OWNER},'message_id':1,'media_group_id':'album','document':{'file_id':'png','mime_type':'image/png'}}
     bot.receive_media(msg)
-    assert len(db[bot.reference_key(OWNER)]['items'])==1
+    assert len(db[db[bot.reference_key(OWNER)]['group_key']]['items'])==1
     with pytest.raises(ValueError):bot.receive_media({**msg,'document':{'file_id':'x','mime_type':'application/pdf'}})
-    for i in range(2,11):bot.receive_media(photo(i,str(i)))
-    with pytest.raises(ValueError,match='10'):bot.receive_media(photo(11,'eleven'))
+    for i in range(2,11):bot.receive_media({**photo(i,str(i)),'media_group_id':'album'})
+    with pytest.raises(ValueError,match='10'):bot.receive_media({**photo(11,'eleven'),'media_group_id':'album'})
 
 
-def test_edit_caption_snapshots_all_refs_and_clear_does_not_touch_job(monkeypatch):
+def test_reply_snapshots_all_refs_and_clear_does_not_touch_job(monkeypatch):
     refs=[{'identity':'a','file_id':'file','message_id':1}]
-    db={bot.reference_key(OWNER):{'items':refs,'caption':'make it blue'}};memory(monkeypatch,db)
+    group='media:album'
+    db={group:{'items':refs},'media-message:'+str(OWNER)+':1':group};memory(monkeypatch,db)
     monkeypatch.setattr(bot,'tg',lambda *a,**k:{'message_id':50})
-    bot.handle({'message':{'chat':{'id':OWNER},'message_id':2,'text':'/editar'}})
+    bot.handle({'message':{'chat':{'id':OWNER},'message_id':2,'text':'/editar make it blue',
+                          'reply_to_message':{'message_id':1}}})
     job=next(v for k,v in db.items() if k.startswith('job:'))
     assert job['recipe']['positive_prompt']=='make it blue' and job['operation']=='edit'
     bot.handle({'message':{'chat':{'id':OWNER},'message_id':3,'text':'/limpiar'}})
-    assert db[bot.reference_key(OWNER)]['items']==[]
     assert job['telegram_inputs']==refs
 
 

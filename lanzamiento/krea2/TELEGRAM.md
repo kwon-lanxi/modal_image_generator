@@ -124,3 +124,10 @@ En lotes `n>1`, ya no se construyen como `seed`, `seed+1`, etc. Cada imagen obti
 ## Progreso de descargas en Telegram (Krea2)
 
 Durante /descargar y /descargar_modelo el bot edita el mensaje temporal cada vez que avanza la descarga. Muestra porcentaje, cantidad descargada, tamaño total y velocidad en MB/GB; al terminar, el mensaje de progreso se limpia y queda la confirmación habitual. Los logs estructurados conservan también los bytes exactos.
+
+
+## Entrega de lotes y descargas (actualización 2026-11-22)
+
+Los lotes se envían en un álbum con copias JPEG de hasta 1600 px y calidad 88, preparadas en CPU con hasta tres lecturas concurrentes. Los originales PNG y sus metadatos permanecen en R2/Volume y en Biblioteca. Los reenvíos del álbum reutilizan file_id. Los logs `telegram.album.prepare` permiten comparar bytes originales, bytes enviados y tiempo de preparación; `telegram.http` mide el envío real. La CPU del bot dispone de 0.5 cores y 1 GiB, con escala a cero.
+
+`/descargar_modelo ENLACE [nombre]` descarga checkpoints en CPU a diffusion_models, con el mismo progreso y fuentes HF/Civitai que las LoRAs. `/descargar` sigue descargando LoRAs.

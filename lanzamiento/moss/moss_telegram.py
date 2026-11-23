@@ -386,15 +386,31 @@ def deliver_album(key,job):
     cached=job.get("telegram_album_file_ids",[])
     media=[];files={}
     seeds=[str(item.get("seed_string",item.get("seed"))) for item in result["batch"]]
+    prepared=[]
+    if not (len(cached)==len(images) and all(cached)):
+        from concurrent.futures import ThreadPoolExecutor
+        from io import BytesIO
+        from PIL import Image, ImageOps
+        def prepare(image):
+            started=time.perf_counter()
+            raw=api("GET","/serve_image?filename="+quote(image["filename"],safe="")).content
+            with Image.open(BytesIO(raw)) as original:
+                photo=ImageOps.exif_transpose(original).convert("RGB")
+                photo.thumbnail((1600,1600),Image.Resampling.LANCZOS)
+                output=BytesIO()
+                photo.save(output,format="JPEG",quality=88)
+            data=output.getvalue()
+            print(json.dumps({"event":"telegram.album.prepare","original_bytes":len(raw),
+                              "upload_bytes":len(data),"seconds":round(time.perf_counter()-started,3)}))
+            return data
+        with ThreadPoolExecutor(max_workers=min(3,len(images))) as pool:
+            prepared=list(pool.map(prepare,images))
     for index,image in enumerate(images):
         if len(cached)==len(images) and all(cached):
             source=cached[index]
         else:
-            raw=api("GET","/serve_image?filename="+quote(image["filename"],safe="")).content
-            # Verify actual bytes too, before any Telegram delivery.
-            if len(raw)>=ALBUM_IMAGE_LIMIT_BYTES:return False
             name="image"+str(index)
-            files[name]=(image["filename"],raw,"image/png")
+            files[name]=(Path(image["filename"]).stem+".jpg",prepared[index],"image/jpeg")
             source="attach://"+name
         item={"type":"photo","media":source}
         if index==0:item["caption"]="\n".join(seeds)
@@ -438,8 +454,7 @@ def deliver(key,job,raw=None):
             raise RuntimeError("Consultar entrega pendiente del álbum antes de reenviar")
         # Older partial deliveries must continue individually, avoiding duplicates.
         partial=any(state("get","job:"+key+"_"+str(i)) for i in range(len(result["images"])))
-        if (not partial and all(0<image.get("size_bytes",0)<ALBUM_IMAGE_LIMIT_BYTES for image in result["images"])
-                and deliver_album(key,job)):
+        if not partial and deliver_album(key,job):
             return
         for index,image in enumerate(result["images"]):
             child_key=key+"_"+str(index)
@@ -741,13 +756,13 @@ def telegram_network_diagnostics():
 def register(app,image):
     global telegram_credentials_ready,TelegramState,telegram_process,telegram_web,telegram_configure,telegram_diagnostics,telegram_redeliver,telegram_network_diagnostics
     credentials=[modal.Secret.from_name("tg-token-image"),modal.Secret.from_name("moss-telegram-config")]
-    telegram_credentials_ready=app.function(image=image,secrets=credentials,cpu=.125,memory=256)(telegram_credentials_ready)
-    TelegramState=app.cls(image=image,volumes={"/state":volume},cpu=.125,memory=256,max_containers=1,scaledown_window=2)(modal.concurrent(max_inputs=1)(TelegramState))
-    telegram_process=app.function(image=image,region="eu-west",secrets=credentials,cpu=.125,memory=256,max_containers=1,scaledown_window=2,timeout=120,retries=0)(telegram_process)
-    telegram_web=app.function(image=image,region="eu-west",secrets=credentials,cpu=.125,memory=256,max_containers=1,scaledown_window=2)(modal.concurrent(max_inputs=16)(modal.asgi_app()(telegram_web)))
-    telegram_configure=app.function(image=image,region="eu-west",secrets=credentials,cpu=.125,memory=256)(telegram_configure)
-    telegram_diagnostics=app.function(image=image,region="eu-west",secrets=credentials,cpu=.125,memory=256)(telegram_diagnostics)
-    telegram_redeliver=app.function(image=image,region="eu-west",secrets=credentials,cpu=.125,memory=256,scaledown_window=2,timeout=180,retries=0)(telegram_redeliver)
+    telegram_credentials_ready=app.function(image=image,secrets=credentials,cpu=.5,memory=1024)(telegram_credentials_ready)
+    TelegramState=app.cls(image=image,volumes={"/state":volume},cpu=.5,memory=1024,max_containers=1,scaledown_window=2)(modal.concurrent(max_inputs=1)(TelegramState))
+    telegram_process=app.function(image=image,region="eu-west",secrets=credentials,cpu=.5,memory=1024,max_containers=1,scaledown_window=2,timeout=300,retries=0)(telegram_process)
+    telegram_web=app.function(image=image,region="eu-west",secrets=credentials,cpu=.5,memory=1024,max_containers=1,scaledown_window=2)(modal.concurrent(max_inputs=16)(modal.asgi_app()(telegram_web)))
+    telegram_configure=app.function(image=image,region="eu-west",secrets=credentials,cpu=.5,memory=1024)(telegram_configure)
+    telegram_diagnostics=app.function(image=image,region="eu-west",secrets=credentials,cpu=.5,memory=1024)(telegram_diagnostics)
+    telegram_redeliver=app.function(image=image,region="eu-west",secrets=credentials,cpu=.5,memory=1024,scaledown_window=2,timeout=180,retries=0)(telegram_redeliver)
     telegram_network_diagnostics=app.function(image=image,region="eu-west",secrets=credentials,cpu=.25,memory=256,scaledown_window=2,timeout=90)(telegram_network_diagnostics)
 
 
