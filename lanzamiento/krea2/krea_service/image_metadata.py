@@ -19,6 +19,7 @@ def parameters(metadata: dict) -> str:
     return (f"{request['positive_prompt']}\nNegative prompt: {request['negative_prompt']}\n"
             f"Steps: {request['steps']}, Sampler: {request['sampler_name']}, Scheduler: {request['scheduler']}, "
             f"CFG scale: {request['cfg']}, Seed: {request['seed']}, "
+            f"SmartSeedVariance: {request.get('variance','off')}, "
             f"Size: {metadata['width']}x{metadata['height']}, Model: {preset.get('model', '')}, "
             f"VAE: {preset.get('vae', '')}, Precision: {preset.get('weight_dtype', '')}, "
             f"LoRAs: {json.dumps(loras, ensure_ascii=False)}, Created at: {metadata['created_at']}, "

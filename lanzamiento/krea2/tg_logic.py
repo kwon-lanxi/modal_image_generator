@@ -39,10 +39,20 @@ def parse_prompt(text, aliases, model_aliases=None):
         raise ValueError('Hay comillas sin cerrar. Usá comillas dobles para valores con espacios, por ejemplo --neg "texto negativo".') from None
     prompt, loras, options = [], {}, {}
     names = {"-w":"width", "-h":"height", "--seed":"seed", "--steps":"steps", "--cfg":"cfg", "--n":"n", "--vae":"vae_alias", "--size":"size", "--model":"unet_name", "--profile":"profile", "--neg":"negative_prompt"}
+    names.update({"--sampler":"sampler_name","--sample":"sampler_name","--scheduler":"scheduler","--screluder":"scheduler",
+        "--variance":"variance","--variance-strength":"variance_strength","--variance-seed":"variance_seed",
+        "--variance-protect":"variance_protect","--variance-regions":"variance_regions","--variance-direction":"variance_direction",
+        "--variance-shift":"variance_shift","--variance-fade":"variance_fade","--variance-timing":"variance_timing",
+        "--variance-schedule":"variance_schedule","--variance-cutoff":"variance_cutoff","--variance-tail":"variance_tail",
+        "--variance-vibe":"variance_vibe","--variance-blend":"variance_blend"})
+    switches={"--variance-freeze":"variance_freeze","--variance-normalize":"variance_normalize"}
     i = 0
     while i < len(tokens):
         t = tokens[i]
-        if t in names:
+        if t in switches:
+            if switches[t] in options:raise ValueError(f"El parámetro {t} está repetido.")
+            options[switches[t]]=True
+        elif t in names:
             i += 1
             if i == len(tokens) or tokens[i] in names or tokens[i].startswith("--"):
                 raise ValueError(f"Falta el valor de {t}.")
@@ -78,13 +88,15 @@ def parse_prompt(text, aliases, model_aliases=None):
         if vae_alias.lower() not in VAE_ALIASES:raise ValueError(f"VAE {vae_alias!r} no reconocido. Elegí base, wanx2, realvae o HDvae.")
         recipe["vae_name"]=VAE_ALIASES[vae_alias.lower()]
     for key,value in options.items():
-        if key in {"unet_name", "profile", "negative_prompt"}:
+        if key in {"unet_name", "profile", "negative_prompt", "sampler_name", "scheduler", "variance",
+                   "variance_protect", "variance_regions", "variance_direction", "variance_fade", "variance_timing",
+                   "variance_schedule", "variance_vibe", "variance_freeze", "variance_normalize"}:
             recipe[key] = value
         else:
             flag = next((name for name,field in names.items() if field==key),key)
-            try: recipe[key] = float(value) if key == "cfg" else int(value)
+            try: recipe[key] = float(value) if key in {"cfg","variance_tail","variance_blend"} else int(value)
             except (TypeError, ValueError):
-                expected = "un número" if key == "cfg" else "un entero"
+                expected = "un número" if key in {"cfg","variance_tail","variance_blend"} else "un entero"
                 raise ValueError(f"{flag} debe ser {expected}; recibí {value[:48]!r}.") from None
     if recipe.get("profile") not in {"turbo", "turbo-scaled", "raw"}:
         raise ValueError("--profile debe ser turbo, turbo-scaled o raw.")
@@ -98,6 +110,20 @@ def parse_prompt(text, aliases, model_aliases=None):
     if not 1<=recipe.get("cfg",1)<=12: raise ValueError("--cfg debe estar entre 1 y 12.")
     if not 0<=recipe.get("seed",0)<2**63: raise ValueError("--seed debe estar entre 0 y 2^63-1.")
     if not 1<=recipe.get("n",1)<=8:raise ValueError("--n admite entre 1 y 8 imágenes.")
+    from krea_service.contracts import GenerateRequest
+    from pydantic import ValidationError
+    try:GenerateRequest.model_validate(recipe)
+    except ValidationError as exc:
+        messages=[]
+        for error in exc.errors(include_input=False,include_context=False)[:3]:
+            key=str(error["loc"][0]) if error["loc"] else "variance"
+            flag=next((flag for flag,field in {**names,**switches}.items() if field==key),key)
+            messages.append(flag+": "+error["msg"].removeprefix("Value error, "))
+        raise ValueError("\n".join(messages)) from None
+    from krea_service.config import profile
+    effective_steps=recipe.get("steps",profile(recipe["profile"])["steps"])
+    if recipe.get("variance","off")!="off" and recipe.get("variance_schedule","constant")!="constant" and recipe.get("variance_cutoff",4)>effective_steps:
+        raise ValueError("--variance-cutoff no puede superar --steps.")
     return recipe
 
 

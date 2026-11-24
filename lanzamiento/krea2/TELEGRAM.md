@@ -131,3 +131,47 @@ Durante /descargar y /descargar_modelo el bot edita el mensaje temporal cada vez
 Los lotes se envían en un álbum con copias JPEG de hasta 1600 px y calidad 88, preparadas en CPU con hasta tres lecturas concurrentes. Los originales PNG y sus metadatos permanecen en R2/Volume y en Biblioteca. Los reenvíos del álbum reutilizan file_id. Los logs `telegram.album.prepare` permiten comparar bytes originales, bytes enviados y tiempo de preparación; `telegram.http` mide el envío real. La CPU del bot dispone de 0.5 cores y 1 GiB, con escala a cero.
 
 `/descargar_modelo ENLACE [nombre]` descarga checkpoints en CPU a diffusion_models, con el mismo progreso y fuentes HF/Civitai que las LoRAs. `/descargar` sigue descargando LoRAs.
+
+
+## SmartSeedVariance y elección de muestreo
+
+Desactivado por defecto: omitir `--variance` o usar `--variance off` conserva el conditioning original. Se aplica solo al conditioning positivo, después del encoder y de las LoRAs. Cada imagen del lote recibe su propia perturbación reproducible; el muestreo sigue siendo un batch. No requiere pesos extra.
+
+```text
+retrato en una cafetería !mi_estilo:0.7 --n 6 --variance balanced
+retrato !mi_persona:0.8 --variance subtle --variance-protect first-half
+escena fantástica --variance creative --variance-direction composition --sample euler --screluder beta
+retrato --variance custom --variance-strength 25 --variance-protect custom --variance-regions "0-5,15-20"
+retrato --steps 8 --variance balanced --variance-schedule step_cutoff --variance-cutoff 3 --variance-tail 0
+```
+
+`/variacion` lista los controles y `/muestreo` lista todos los samplers/schedulers disponibles en la revisión fijada de ComfyUI. `--sample` equivale a `--sampler`; `--screluder` equivale a `--scheduler`. Sin flags: Euler/simple. La preview de dos pasos mantiene Euler/simple aunque se pidan otros.
+
+| Flag | Valores / efecto |
+|---|---|
+| `--variance` | off, subtle, balanced, creative, bold, wild, custom |
+| `--variance-strength` | 0–100, solo afecta al preset custom |
+| `--variance-seed` | Entero opcional; se mezcla con la semilla de cada imagen para mantener independencia y repetición |
+| `--variance-protect` | none, first-quarter, first-half, last-quarter, last-half, custom, random |
+| `--variance-regions` | Índices/rangos entre comillas para protect custom; son tokens, no palabras ni detección automática de identidad |
+| `--variance-direction` | Patrones del nodo; ver lista completa en /variacion |
+| `--variance-shift` | 0–200; multiplicador del patrón de dirección |
+| `--variance-fade` | instant, linear, ease-out, ease-in, ease-in-out, smooth-step, burst |
+| `--variance-timing` | all, beginning, ending |
+| `--variance-schedule` | constant, decreasing, step_cutoff, tiered_release, hard_lock |
+| `--variance-cutoff` | 0 hasta pasos efectivos; default 4; solo schedules avanzados |
+| `--variance-tail` | 0–1; intensidad posterior al cutoff |
+| `--variance-freeze` | Flag booleano; conserva estructura según el algoritmo del nodo |
+| `--variance-normalize` | Flag booleano; normaliza la intensidad con el conditioning |
+| `--variance-vibe` | Prompt de referencia entre comillas, codificado con el mismo encoder/LoRAs |
+| `--variance-blend` | 0–1; mezcla de referencia, default 0.5 |
+
+Los schedules avanzados tienen prioridad sobre timing. El nodo representa las ventanas como porcentajes de progreso de ComfyUI (`cutoff/steps`), no como un contador que cambie exactamente después del N-ésimo callback. Beginning/ending usa el umbral 20% del código upstream. Reducir el cutoff al usar preview de 2 pasos.
+
+Empezar con subtle/balanced. Mayor intensidad puede alterar identidad, composición y seguimiento del prompt; la compatibilidad matemática con LoRAs no garantiza la calidad visual de cada combinación. No usar wild como default. El negativo permanece intacto.
+
+Los metadatos de originales PNG/JSON y R2 guardan los campos `variance*` de la solicitud y `generation.smart_seed_variance`: versión, configuración y semilla efectiva por imagen. Repetir/nueva variante y las recetas guardadas retienen los ajustes. El cache del encoder conserva el conditioning sin modificar. El log `variance.applied` y la etapa `smart_seed_variance` permiten medir el coste.
+
+API: mismos nombres con guiones bajos (`variance_protect`, `variance_schedule`, etc.); `GET /sampling-options` devuelve opciones sin iniciar GPU. El playground incluye controles. El adaptador carga de forma diferida el módulo upstream, sin inicializar la UI ni escanear custom_nodes.
+
+Fuente fijada: https://github.com/RamonGuthrie/ComfyUI-RBG-SmartSeedVariance/tree/187da1cbfd80a116cc13389ef22b9978ad01783b . Código upstream sin cambios en `krea_service/vendor/smart_seed_variance.py`; licencia GPL-3.0-or-later y atribución en la misma carpeta. El adaptador local está en `krea_service/variance.py`.

@@ -91,6 +91,11 @@ def create_api(submit, poll, read, progress=None):
         return {"ok": True, "status": "ok", "service": "cpu-api", "version": VERSION,
                 "gpu_probed": False}
 
+    @app.get("/sampling-options")
+    async def sampling_options():
+        from .variance import OPTIONS, PROTECTION, TIMING
+        return {**OPTIONS,"protection":list(PROTECTION),"timing":list(TIMING),"default_variance":"off"}
+
     @app.get("/profiles")
     async def profiles():
         return {"profiles": config.profiles()}

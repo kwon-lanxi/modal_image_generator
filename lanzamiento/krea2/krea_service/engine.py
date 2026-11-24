@@ -182,6 +182,17 @@ class Engine:
             with log.stage("encode", timing):
                 (positive, negative), cache_hit = self.prompt(clip, request, combo)
                 torch.cuda.synchronize()
+            from .variance import apply_batch
+            variance_metadata = None
+            if request.get("variance", "off") != "off":
+                with log.stage("smart_seed_variance", timing):
+                    target = None
+                    if request.get("variance_vibe"):
+                        (target, _), _ = self.prompt(clip, {**request,"positive_prompt":request["variance_vibe"],"negative_prompt":"","cfg":1.0}, combo)
+                    positive, variance_metadata = apply_batch(positive, request, target)
+                    torch.cuda.synchronize()
+                    log.event("variance.applied", preset=request["variance"], count=len(request["seeds"]),
+                              revision=variance_metadata["revision"])
             latent = EmptyLatentImage().generate(request["width"], request["height"], 1)[0]["samples"]
             latent = comfy.sample.fix_empty_latent_channels(model, latent)
             latent,noise=batch_noise(latent,request.get("seeds",[request["seed"]]),comfy.sample.prepare_noise)
@@ -226,7 +237,7 @@ class Engine:
             "batch_pixels":[p.numpy().tobytes() for p in pixels] if request.get("n",1)>1 else [], "pixels": raw, "height": pixels.shape[1], "width": pixels.shape[2], "timing": timing,
             "events": log.records,
             "metadata": {
-                "generation_started_at_utc": started_at,
+                "generation_started_at_utc": started_at, "smart_seed_variance": variance_metadata,
                 "generation_finished_at_utc": datetime.now(timezone.utc).isoformat(),
                 "software": f"Krea2 personal {VERSION}", "profile": self.preset,
                 "assets": self.versions, "loras": loras,

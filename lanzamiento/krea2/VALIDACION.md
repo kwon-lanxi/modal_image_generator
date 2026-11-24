@@ -58,3 +58,15 @@ Quedan sin validar: conversión CPU real a FP8 scaled en disco, inferencia RAW, 
 - Canal de progreso comprobado HTTP200 contra Modal Dict real con evento sintético identificado como fixture. Sin token401. Se eliminó la entrada de prueba. No se lanzó otra generación GPU para esta revisión; el callback está cubierto con tests CPU, y la generación real corresponde a2.1.0.
 - El redespliegue cambia código/imagen e invalida snapshots anteriores según Modal; la primera generación posterior puede volver a capturar el modelo. No se precalentó para evitar gasto adicional.
 - Logs reales de generación del usuario90398fbb3e9a070b328f64b47f4b9315: sampler18,3124s, métodoGPU19,3479s, RPC126,8042s, preparación+RPC135,4336s, persistencia/upload17,1793s. Los107,4563s entre RPC y método no permiten separar cola, restauración, transferencias y tiempo cobrable.
+
+
+## SmartSeedVariance (2026-11-24)
+
+- `python -m pytest lanzamiento/krea2/tests/test_variance.py lanzamiento/krea2/tests/test_service.py lanzamiento/krea2/tests/test_batches.py -q -k 'not conversion_keeps_original and not batch_delivery_resumes'`: 95 passed, 2 deselected.
+- Los dos casos excluidos fallan también ejecutando HEAD anterior en un directorio temporal: conversión legacy y fixture de entrega de batches. No se modificaron para ocultar errores.
+- El módulo upstream se comparó con el archivo de la revisión 187da1cbfd80a116cc13389ef22b9978ad01783b: contenido idéntico.
+- Playground JS: `node --check` pasó.
+- Despliegue Modal completado; `/sampling-options` devuelve HTTP200, revisión fijada y default off. Menú Telegram actualizado con /variacion y /muestreo; webhook sin pendientes ni error registrado.
+- Prueba GPU real por API: 2 imágenes, 512×512, 2 pasos, Euler/simple, variance subtle, step_cutoff1. Success; ambas imágenes subidas a R2. GPU asignada: NVIDIA RTX PRO 6000 Blackwell Server Edition.
+- Se descargaron ambos originales y se extrajeron sus metadatos PNG: configuración de variación y semilla efectiva independientes por imagen correctas.
+- La prueba verifica integración y persistencia, no calidad visual de todos los samplers, LoRAs o presets. El warmup con variación off también completó durante la creación del snapshot.

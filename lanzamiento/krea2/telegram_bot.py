@@ -234,6 +234,9 @@ def draft(chat,recipe,source_message_id=None):
     ratio=next((k for k,v in ASPECT_RATIOS.items() if v==(recipe['width'],recipe['height'])),"Personalizado")
     loras=", ".join(Path(k).stem[:40]+":"+str(v) for k,v in recipe.get("lora",{}).items()) or "ninguna"
     text=f"Krea2 · {ratio} · {recipe['width']}×{recipe['height']} · {recipe.get('steps',8)} pasos · {recipe.get('n',1)} imágenes\nLoRAs: {loras}"
+    text += f"\nMuestreo: {recipe.get('sampler_name','euler')} / {recipe.get('scheduler','simple')}"
+    if recipe.get("variance","off")!="off":
+        text += f"\nVariación: {recipe['variance']} · {recipe.get('variance_timing','all')} · {recipe.get('variance_schedule','constant')}"
     message=send(chat,text,buttons([[button("Generar","go:"+key),button("Descartar","drop:"+key)]]),reply_to=source_message_id)
     state("put","job:"+key,{"status":"draft","chat":chat,"recipe":recipe,
           "source_message_id":source_message_id,"confirmation_id":message["message_id"]})
@@ -298,8 +301,19 @@ def handle(update):
     if command=="/galeria":
         send(chat,"Tus imágenes y recetas guardadas.",library("gallery"));return
     if command in {"/start","/help","/loras"}:
-        send(chat,"Krea2 personal\nPrompt !alias:0.8 --model alias --size 9:16 --n 4\n--profile turbo/raw elige la familia del modelo · --neg \"texto negativo\"\n--neg requiere CFG > 1 (usa --profile raw o --cfg > 1)\n--vae base/wanx2/realvae/HDvae\nProporciones: 1:1 · 16:9 · 9:16 · 4:3 · 3:4 · 3:2 · 2:3\n-w 896 -h 1152 --seed 42 --steps 8 --cfg 1\n/descargar ENLACE nombre\n/descargar_modelo ENLACE nombre\n/convertir_modelo --model alias --fp8-scaled (o --fp8-mixed)\nLos alias y pesos se editan en Biblioteca; los modelos, en Modelos. Cada generación pide confirmación.",library())
+        send(chat,"Krea2 personal\nPrompt !alias:0.8 --model alias --size 9:16 --n 4\n--profile turbo/raw elige la familia del modelo · --neg \"texto negativo\"\n--neg requiere CFG > 1 (usa --profile raw o --cfg > 1)\n--vae base/wanx2/realvae/HDvae\nProporciones: 1:1 · 16:9 · 9:16 · 4:3 · 3:4 · 3:2 · 2:3\n-w 896 -h 1152 --seed 42 --steps 8 --cfg 1\n/descargar ENLACE nombre\n/descargar_modelo ENLACE nombre\n/convertir_modelo --model alias --fp8-scaled (o --fp8-mixed)\nLos alias y pesos se editan en Biblioteca; los modelos, en Modelos. Cada generación pide confirmación.\n--variance balanced (opcional; off por defecto) · /variacion\n--sampler euler --scheduler simple · /muestreo",library())
         return
+    if command=="/variacion":
+        from krea_service.variance import PRESETS,DIRECTIONS,FADES,PROTECTION,TIMING
+        send(chat,"SmartSeedVariance (opcional; por defecto off)\n--variance "+", ".join(PRESETS)+
+             "\n--variance-strength 0–100 (custom) · --variance-seed ENTERO\n--variance-protect "+", ".join(PROTECTION)+
+             '\n--variance-regions "0-5,15-20" (protect custom)\n--variance-direction '+", ".join(DIRECTIONS)+
+             "\n--variance-shift 0–200\n--variance-fade "+", ".join(FADES)+
+             "\n--variance-timing "+", ".join(TIMING)+
+             "\n--variance-schedule constant/decreasing/step_cutoff/tiered_release/hard_lock\n--variance-cutoff 4 · --variance-tail 0–1\n--variance-freeze · --variance-normalize\n--variance-vibe \"prompt de referencia\" · --variance-blend 0–1\nLos schedules avanzados tienen prioridad sobre timing. Las regiones son índices de tokens.\nEjemplo: retrato --n 6 --variance balanced");return
+    if command=="/muestreo":
+        from krea_service.variance import SAMPLERS,SCHEDULERS
+        send(chat,"--sampler (o --sample): "+", ".join(SAMPLERS)+"\n\n--scheduler (o --screluder): "+", ".join(SCHEDULERS)+"\nPor defecto euler/simple. Preview de 2 pasos conserva euler/simple.");return
     if command=="/modelos":
         send(chat,"Administrá alias, conversiones FP8 y checkpoints.",library("models"));return
     if command=="/estado":
@@ -694,7 +708,7 @@ def telegram_web():
 def telegram_configure(url):
     from tg_logic import OWNER
     me=tg("getMe")
-    commands=[{"command":k,"description":v} for k,v in [("generar","Crear una imagen"),("loras","Biblioteca de LoRAs y alias"),("modelos","Administrar modelos y alias"),("convertir_modelo","Convertir un checkpoint a FP8"),("galeria","Imágenes y recetas"),("estado","Consultar trabajo actual"),("trabajos","Últimos trabajos"),("descargar","Descargar una LoRA por enlace"),("descargar_modelo","Descargar un checkpoint"),("help","Ayuda y parámetros")]]
+    commands=[{"command":k,"description":v} for k,v in [("generar","Crear una imagen"),("variacion","Opciones SmartSeedVariance"),("muestreo","Samplers y schedulers disponibles"),("loras","Biblioteca de LoRAs y alias"),("modelos","Administrar modelos y alias"),("convertir_modelo","Convertir un checkpoint a FP8"),("galeria","Imágenes y recetas"),("estado","Consultar trabajo actual"),("trabajos","Últimos trabajos"),("descargar","Descargar una LoRA por enlace"),("descargar_modelo","Descargar un checkpoint"),("help","Ayuda y parámetros")]]
     tg("setMyCommands",commands=commands)
     tg("setChatMenuButton",chat_id=OWNER,menu_button={"type":"web_app","text":"Biblioteca","web_app":{"url":url.rstrip("/")+"/mini"}})
     result=tg("setWebhook",url=url.rstrip("/")+"/webhook",secret_token=os.environ["TELEGRAM_WEBHOOK_SECRET"],allowed_updates=["message","callback_query"],max_connections=2,drop_pending_updates=False)

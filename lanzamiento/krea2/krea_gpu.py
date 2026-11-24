@@ -38,11 +38,11 @@ GPU_IMAGE = (
           "TORCHINDUCTOR_COMPILE_THREADS": "1"})
 )
 GPU_IMAGE = GPU_IMAGE.add_local_file(str(HERE / "krea_gpu.py"), "/root/krea_gpu.py", copy=True)
-GPU_SOURCE_FILES = ('__init__.py', 'config.py', 'profiles.json', 'contracts.py', 'files.py', 'logging_utils.py', 'progress.py', 'engine.py', 'snapshot.py')
+GPU_SOURCE_FILES = ('__init__.py', 'config.py', 'profiles.json', 'contracts.py', 'files.py', 'logging_utils.py', 'progress.py', 'engine.py', 'snapshot.py', 'variance.py', 'variance_options.json')
 for name in GPU_SOURCE_FILES:
     GPU_IMAGE = GPU_IMAGE.add_local_file(str(HERE / "krea_service" / name), "/root/krea_service/"+name, copy=True)
 
-
+GPU_IMAGE = GPU_IMAGE.add_local_dir(str(HERE / "krea_service" / "vendor"), "/root/krea_service/vendor", copy=True)
 
 @gpu_app.cls(image=GPU_IMAGE, include_source=False,gpu=["L40S", "RTX-PRO-6000", "H100"], cpu=4, memory=(32768, 65536), volumes=ro,
          min_containers=0, max_containers=1, buffer_containers=0,

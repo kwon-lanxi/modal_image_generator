@@ -7,9 +7,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .config import profile
+from .variance import VarianceRequest, SAMPLERS, SCHEDULERS
 
 
-class GenerateRequest(BaseModel):
+class GenerateRequest(VarianceRequest):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     profile: Literal["turbo", "turbo-scaled", "raw"] = "turbo"
     unet_name: str | None = Field(default=None, min_length=1, max_length=512)
@@ -28,8 +29,8 @@ class GenerateRequest(BaseModel):
     lora: dict[str, float] = Field(default_factory=dict, max_length=8)
     steps: int | None = Field(default=None, ge=1, le=80)
     cfg: float | None = Field(default=None, ge=1, le=12)
-    sampler_name: Literal["euler", "er_sde"] = "euler"
-    scheduler: Literal["simple", "beta", "normal"] = "simple"
+    sampler_name: Literal[tuple(SAMPLERS)] = "euler"
+    scheduler: Literal[tuple(SCHEDULERS)] = "simple"
     use_tiled_vae: bool = False
     vae_tile_size: int = Field(default=512, ge=128, le=1024, multiple_of=32)
     vae_tile_overlap: int = Field(default=64, ge=0, le=256, multiple_of=8)
@@ -71,6 +72,8 @@ def normalize(payload: dict, mode: str) -> dict:
     else:
         data["steps"] = data["steps"] or preset["steps"]
         data["cfg"] = data["cfg"] if data["cfg"] is not None else preset["cfg"]
+    if data["variance"] != "off" and data["variance_schedule"] != "constant" and data["variance_cutoff"] > data["steps"]:
+        raise ValueError("--variance-cutoff no puede superar los pasos efectivos del trabajo.")
     data["seeds"] = independent_seeds(data["n"], data["seed"], data["seeds"])
     data["seed"] = data["seeds"][0]
     data["seed_string"] = str(data["seed"])

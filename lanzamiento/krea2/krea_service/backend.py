@@ -162,6 +162,9 @@ class Backend:
                         for index,(pixels,seed) in enumerate(zip(batch_pixels,request["seeds"])):
                             child_request={**request,"n":1,"seed":seed,"seed_string":str(seed),"seeds":[seed]}
                             child_generated={**generated,"pixels":pixels,"timing":{k:v/request["n"] for k,v in generated["timing"].items()},"metadata":{**generated["metadata"],"batch_timing":generated["timing"],"batch_index":index,"batch_count":request["n"],"parent_job_id":request_id}}
+                            variance=generated["metadata"].get("smart_seed_variance")
+                            if variance:
+                                child_generated["metadata"]["smart_seed_variance"]={**variance,"seeds":[variance["seeds"][index]]}
                             child_id=hashlib.sha256((request_id+":"+str(index)).encode()).hexdigest()[:32]
                             child=save_result(child_generated,child_request,child_id,log,self.commit,self.r2)
                             images.extend(child["images"])
