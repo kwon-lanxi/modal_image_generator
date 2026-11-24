@@ -1,0 +1,150 @@
+{
+  "date": "2026-11-24",
+  "scope": "research only; no weight downloads or MOSS deployment",
+  "candidates": [
+    {
+      "repo": "lvladikov/MOSS-SFT-Distill-4step-LoRA",
+      "revision": "8d211b763fa020facf0f4aa32d6effca965bf37d",
+      "file": "moss_sft_4step_rank_64_lora_comfyui.safetensors",
+      "file_exists": true,
+      "family": "sft",
+      "steps": 4,
+      "cfg": "1; 2 experimental con negativo",
+      "scheduler": "manual sigmas 1,0.91,0.717,0.024,0",
+      "sampler": "euler",
+      "url": "https://huggingface.co/lvladikov/MOSS-SFT-Distill-4step-LoRA/resolve/8d211b763fa020facf0f4aa32d6effca965bf37d/moss_sft_4step_rank_64_lora_comfyui.safetensors"
+    },
+    {
+      "repo": "akhaliq/MOSS-Image-SFT-4-steps",
+      "revision": "2ded95c37a029360245926fe72e475e30039bbfb",
+      "file": "moss_image_sft_4step_v2.0.safetensors",
+      "file_exists": true,
+      "family": "sft; base reportado por autor",
+      "steps": 4,
+      "cfg": "1",
+      "scheduler": "simple",
+      "sampler": "euler",
+      "url": "https://huggingface.co/akhaliq/MOSS-Image-SFT-4-steps/resolve/2ded95c37a029360245926fe72e475e30039bbfb/moss_image_sft_4step_v2.0.safetensors"
+    },
+    {
+      "repo": "akhaliq/MOSS-Image-SFT-4-steps",
+      "revision": "2ded95c37a029360245926fe72e475e30039bbfb",
+      "file": "lora_2step.safetensors",
+      "file_exists": true,
+      "family": "sft experimental",
+      "steps": 2,
+      "cfg": "1; experimento fallido según autor",
+      "scheduler": "simple",
+      "sampler": "euler",
+      "url": "https://huggingface.co/akhaliq/MOSS-Image-SFT-4-steps/resolve/2ded95c37a029360245926fe72e475e30039bbfb/lora_2step.safetensors"
+    },
+    {
+      "repo": "akhaliq/MOSS-Image-SFT-4-steps",
+      "revision": "2ded95c37a029360245926fe72e475e30039bbfb",
+      "file": "moss_image_sft_3step_v1.0.safetensors",
+      "file_exists": true,
+      "family": "sft",
+      "steps": 3,
+      "cfg": "1",
+      "scheduler": "simple",
+      "sampler": "euler",
+      "url": "https://huggingface.co/akhaliq/MOSS-Image-SFT-4-steps/resolve/2ded95c37a029360245926fe72e475e30039bbfb/moss_image_sft_3step_v1.0.safetensors"
+    },
+    {
+      "repo": "DeVilDoNia/HaDeS-MOSS-Turbo",
+      "revision": "8a80997daf0e5d5c626cc7206cc087bf90462b88",
+      "file": "HaDeS-MOSS-Turbo-Diverse-v0.6.safetensors",
+      "file_exists": true,
+      "family": "sft",
+      "steps": 4,
+      "cfg": "1",
+      "scheduler": "simple; shift 5",
+      "sampler": "euler",
+      "url": "https://huggingface.co/DeVilDoNia/HaDeS-MOSS-Turbo/resolve/8a80997daf0e5d5c626cc7206cc087bf90462b88/HaDeS-MOSS-Turbo-Diverse-v0.6.safetensors"
+    },
+    {
+      "repo": "DeVilDoNia/HaDeS-MOSS-Turbo",
+      "revision": "8a80997daf0e5d5c626cc7206cc087bf90462b88",
+      "file": "HaDeS-MOSS-Turbo-v0.6.safetensors",
+      "file_exists": true,
+      "family": "sft",
+      "steps": 4,
+      "cfg": "1",
+      "scheduler": "simple; shift 5",
+      "sampler": "euler",
+      "url": "https://huggingface.co/DeVilDoNia/HaDeS-MOSS-Turbo/resolve/8a80997daf0e5d5c626cc7206cc087bf90462b88/HaDeS-MOSS-Turbo-v0.6.safetensors"
+    },
+    {
+      "repo": "DeVilDoNia/HaDeS-MOSS-Turbo",
+      "revision": "8a80997daf0e5d5c626cc7206cc087bf90462b88",
+      "file": "HaDeS-MOSS-Turbo-8steps-v1.0.safetensors",
+      "file_exists": true,
+      "family": "base",
+      "steps": 8,
+      "cfg": "1 o 1.5; negativo de efecto escaso medido",
+      "scheduler": "simple; shift 5",
+      "sampler": "euler",
+      "url": "https://huggingface.co/DeVilDoNia/HaDeS-MOSS-Turbo/resolve/8a80997daf0e5d5c626cc7206cc087bf90462b88/HaDeS-MOSS-Turbo-8steps-v1.0.safetensors"
+    },
+    {
+      "repo": "DeVilDoNia/HaDeS-MOSS-Turbo",
+      "revision": "8a80997daf0e5d5c626cc7206cc087bf90462b88",
+      "file": "HaDeS-MOSS-Turbo-8steps-sft-v1.0.safetensors",
+      "file_exists": true,
+      "family": "sft",
+      "steps": 8,
+      "cfg": "1 recomendado; >1 experimental",
+      "scheduler": "simple; shift 5",
+      "sampler": "euler",
+      "url": "https://huggingface.co/DeVilDoNia/HaDeS-MOSS-Turbo/resolve/8a80997daf0e5d5c626cc7206cc087bf90462b88/HaDeS-MOSS-Turbo-8steps-sft-v1.0.safetensors"
+    },
+    {
+      "repo": "lodestones/Kromoss",
+      "revision": "f2267fbae7c038441b8d3bd8b7c90f2107ce58f4",
+      "file": "8-steps-dmd2-lora.safetensors",
+      "file_exists": true,
+      "family": "base/kromoss; transferencia a sft no garantizada",
+      "steps": 8,
+      "cfg": "1",
+      "scheduler": "simple; shift 5",
+      "sampler": "euler",
+      "url": "https://huggingface.co/lodestones/Kromoss/resolve/f2267fbae7c038441b8d3bd8b7c90f2107ce58f4/8-steps-dmd2-lora.safetensors"
+    },
+    {
+      "repo": "data-archetype/moss_image_base_dmd2",
+      "revision": "f36d91fc11a3135cf499504e57f2bc9a17a0c1dc",
+      "file": "loras/moss_image_base_dmd2_v2_bf16.safetensors",
+      "file_exists": true,
+      "family": "base; sft/fine-tunes reportado por autor",
+      "steps": 8,
+      "cfg": "1",
+      "scheduler": "simple; shift 4.4817",
+      "sampler": "lcm",
+      "url": "https://huggingface.co/data-archetype/moss_image_base_dmd2/resolve/f36d91fc11a3135cf499504e57f2bc9a17a0c1dc/loras/moss_image_base_dmd2_v2_bf16.safetensors"
+    },
+    {
+      "repo": "lodestones/MOSS-Image-SFT-8-steps-dmd",
+      "revision": "f95df83b5e90ae91ea412434b3f9b7f1c8c6314f",
+      "file": "lora.safetensors",
+      "file_exists": true,
+      "family": "sft",
+      "steps": 8,
+      "cfg": "1",
+      "scheduler": "seguir revisión/workflow actuales; README mezcla ruta antigua y actual",
+      "sampler": "verificar antes de integrar",
+      "url": "https://huggingface.co/lodestones/MOSS-Image-SFT-8-steps-dmd/resolve/f95df83b5e90ae91ea412434b3f9b7f1c8c6314f/lora.safetensors"
+    },
+    {
+      "repo": "anyMODE/moss-image-12step-turbo-lora",
+      "revision": "5045cdb8366d6993282a716613227d79108e8274",
+      "file": "12_step_turbo_moss_1024_distill_v8_r64_weightsx2.safetensors",
+      "file_exists": true,
+      "family": "sft",
+      "steps": 12,
+      "cfg": "1",
+      "scheduler": "simple",
+      "sampler": "euler",
+      "url": "https://huggingface.co/anyMODE/moss-image-12step-turbo-lora/resolve/5045cdb8366d6993282a716613227d79108e8274/12_step_turbo_moss_1024_distill_v8_r64_weightsx2.safetensors"
+    }
+  ]
+}

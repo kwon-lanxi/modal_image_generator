@@ -44,7 +44,7 @@ for name in GPU_SOURCE_FILES:
 
 GPU_IMAGE = GPU_IMAGE.add_local_dir(str(HERE / "krea_service" / "vendor"), "/root/krea_service/vendor", copy=True)
 
-@gpu_app.cls(image=GPU_IMAGE, include_source=False,gpu=["L40S", "RTX-PRO-6000", "H100"], cpu=4, memory=(32768, 65536), volumes=ro,
+@gpu_app.cls(image=GPU_IMAGE, include_source=False,gpu="L40S", cpu=4, memory=(32768, 65536), volumes=ro,
          min_containers=0, max_containers=1, buffer_containers=0,
          single_use_containers=True, timeout=600, startup_timeout=1200,
          retries=0, enable_memory_snapshot=True,
