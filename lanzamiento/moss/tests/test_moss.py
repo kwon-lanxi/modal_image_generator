@@ -92,7 +92,7 @@ def test_turbo_is_eight_steps_and_flags_are_exclusive():
 def test_bot_sizes_models_and_aliases():
  from moss_tg_logic import parse_prompt
  r=parse_prompt("portrait !photo:0.7 --turbo --n 4 --profile base --model custom.safetensors --size 3:4",{"photo":{"id":"loras/photo.safetensors"}})
- assert (r["width"],r["height"])==(1104,1472)
+ assert (r["width"],r["height"])==(1056,1408)
  assert r["steps"]==8 and r["unet_name"]=="custom.safetensors" and r["profile"]=="base"
  assert r["lora"]["loras/photo.safetensors"]==.7
  assert parse_prompt("test --superturbo",{})["steps"]==4
@@ -106,6 +106,6 @@ def test_bot_preserves_json_quotes_bbox_and_negative():
  assert r["positive_prompt"]==raw and json.loads(r["positive_prompt"])==layout
  assert r["negative_prompt"]=="blur, watermark"
  r=parse_prompt(raw+' --size 3:4',{})
- assert r["positive_prompt"]==raw and r["width"]==1104
+ assert r["positive_prompt"]==raw and r["width"]==1056
  with pytest.raises(ValueError):parse_prompt('{"broken":}',{})
- with pytest.raises(ValueError,match="modo normal"):parse_prompt('test --turbo --negative "blur"',{})
+ with pytest.raises(ValueError,match="CFG"):parse_prompt('test --turbo --negative "blur"',{})

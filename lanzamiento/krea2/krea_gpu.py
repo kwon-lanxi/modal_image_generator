@@ -38,7 +38,7 @@ GPU_IMAGE = (
           "TORCHINDUCTOR_COMPILE_THREADS": "1"})
 )
 GPU_IMAGE = GPU_IMAGE.add_local_file(str(HERE / "krea_gpu.py"), "/root/krea_gpu.py", copy=True)
-GPU_SOURCE_FILES = ('__init__.py', 'config.py', 'profiles.json', 'contracts.py', 'files.py', 'logging_utils.py', 'progress.py', 'engine.py', 'snapshot.py', 'variance.py', 'variance_options.json')
+GPU_SOURCE_FILES = ('__init__.py', 'config.py', 'profiles.json', 'contracts.py', 'files.py', 'logging_utils.py', 'progress.py', 'engine.py', 'snapshot.py', 'resolution.py', 'variance.py', 'variance_options.json')
 for name in GPU_SOURCE_FILES:
     GPU_IMAGE = GPU_IMAGE.add_local_file(str(HERE / "krea_service" / name), "/root/krea_service/"+name, copy=True)
 

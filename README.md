@@ -13,6 +13,10 @@ Workers personales de generación de imágenes con Modal para Krea 2, Qwen Image
 
 Las carpetas de Krea, Qwen y MOSS contienen su propia app Modal, API, código GPU/CPU, servicios, Mini App/Telegram y documentación. `lanzamiento/shared_model_conversion.py` comparte utilidades de conversión.
 
+Los tres bots aceptan megapíxeles reales: `--size 3:4 2mp` (también `2`), con 1,5 MP por defecto y rango 0,25–4 MP. Las dimensiones se redondean al múltiplo del modelo; `-w` y `-h` permiten dimensiones explícitas. En la API: `aspect_ratio` y `resolution_mp`, sin enviar width/height.
+
+MOSS añade recetas HaDeS, Kromoss, Juggernaut, SFT de 4 pasos e IDM de 2 pasos, consultables con `/turbo`. `--upscarler x2` / `x4` (alias correcto: `--upscaler`) aplica FlowUpscaler a todo el lote. El modo IDM Base es experimental; el adaptador fue entrenado en SFT. Detalles, compatibilidad y fuentes en [la investigación de integración](docs/research/moss-acceleration-integration-2026-11-24.md).
+
 ## Requisitos para continuar desde otra computadora
 
 - Git y Python 3.12.

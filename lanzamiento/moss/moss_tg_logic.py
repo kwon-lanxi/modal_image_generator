@@ -8,11 +8,8 @@ import time
 from urllib.parse import parse_qsl
 
 OWNER = 7112930476
-ASPECT_RATIOS = {
-    "1:1": (1328, 1328), "16:9": (1664, 928), "9:16": (928, 1664),
-    "4:3": (1472, 1104), "3:4": (1104, 1472),
-    "3:2": (1584, 1056), "2:3": (1056, 1584),
-}
+from moss_service.resolution import RATIOS, dimensions, extract_size
+ASPECT_RATIOS = {ratio:dimensions(ratio,alignment=16) for ratio in RATIOS}
 SIZES = {**ASPECT_RATIOS, "square": ASPECT_RATIOS["1:1"],
          "cuadrado": ASPECT_RATIOS["1:1"], "vertical": ASPECT_RATIOS["9:16"],
          "horizontal": ASPECT_RATIOS["16:9"]}
@@ -60,12 +57,18 @@ def parse_prompt(text, aliases, model_aliases=None):
         if str(exc).startswith("JSON inválido:"):
             raise
         raise ValueError('Hay comillas sin cerrar. Usá comillas dobles para valores con espacios, por ejemplo --neg "texto negativo".') from None
+    tokens,size_mp=extract_size(tokens)
     prompt, loras, options = [], {}, {}
     names = {"-w":"width", "-h":"height", "--seed":"seed", "--steps":"steps", "--cfg":"cfg", "--n":"n", "--vae":"vae_alias", "--size":"size", "--model":"unet_name", "--profile":"profile", "--negative":"negative_prompt", "--neg":"negative_prompt"}
+    from moss_service.acceleration import FLAGS,PRESETS
+    names.update({"--upscarler":"upscale","--upscaler":"upscale","--sampler":"sampler_name","--sample":"sampler_name","--scheduler":"scheduler","--screluder":"scheduler"})
     i = 0
     while i < len(tokens):
         t = tokens[i]
-        if t in {"--turbo","--turbo12","--superturbo"}:
+        if t in FLAGS:
+            if "acceleration" in options:raise ValueError("Elegí un solo modo de aceleración.")
+            options["acceleration"]=FLAGS[t]
+        elif t in {"--turbo","--turbo12","--superturbo"}:
             options[t[2:]]=True
         elif t in names:
             i += 1
@@ -95,34 +98,40 @@ def parse_prompt(text, aliases, model_aliases=None):
         if found:options["unet_name"]=found["id"]
     size = options.pop("size", "1:1")
     if size not in SIZES: raise ValueError(f"--size {size!r} no es válido. Elegí: " + ", ".join(ASPECT_RATIOS))
-    w,h = SIZES[size]
+    w,h = dimensions(size,size_mp if size_mp is not None else 1.5,alignment=16)
     recipe = {"positive_prompt":" ".join(prompt), "profile":"sft", "width":w, "height":h, "lora":loras, "return_base64":False}
+    recipe.update(resolution_mp=size_mp if size_mp is not None else 1.5,aspect_ratio=size)
     vae_alias=options.pop("vae_alias",None)
     if vae_alias:
         from moss_service.config import VAE_ALIASES
         if vae_alias.lower() not in VAE_ALIASES:raise ValueError(f"VAE {vae_alias!r} no reconocido. Consultá /help para ver los VAE disponibles.")
         recipe["vae_name"]=VAE_ALIASES[vae_alias.lower()]
     for key,value in options.items():
-        if key in {"profile","unet_name","turbo","turbo12","superturbo","negative_prompt"}:
+        if key in {"profile","unet_name","turbo","turbo12","superturbo","negative_prompt","acceleration","sampler_name","scheduler"}:
             recipe[key]=value
         else:
             flag=next((name for name,field in names.items() if field==key),key)
-            try:recipe[key]=float(value) if key=="cfg" else int(value)
+            try:recipe[key]=int(value.lower().removeprefix("x")) if key=="upscale" else float(value) if key=="cfg" else int(value)
             except (TypeError,ValueError):
                 expected="un número" if key=="cfg" else "un entero"
                 raise ValueError(f"{flag} debe ser {expected}; recibí {value[:48]!r}.") from None
-    if recipe.get("negative_prompt", "").strip() and recipe.get("cfg", 3.0) <= 1:
-        raise ValueError("--neg requiere CFG mayor que 1")
-    if (recipe.get("turbo") or recipe.get("turbo12") or recipe.get("superturbo")) and recipe.get("negative_prompt", "").strip():
-        raise ValueError("El negative prompt requiere el modo normal con --cfg mayor que 1; omitir los flags turbo")
-    if recipe.get("turbo") or recipe.get("turbo12") or recipe.get("superturbo"):
-        from moss_service.contracts import normalize
+    if recipe.get("acceleration") and "profile" not in options:recipe.pop("profile",None)
+    from moss_service.contracts import normalize
+    from pydantic import ValidationError
+    try:
         normalized=normalize(recipe,"generate")
-        for key in ("steps","cfg","lora","sampler_name","scheduler","negative_prompt"):recipe[key]=normalized[key]
+    except ValidationError as exc:
+        messages=[]
+        for error in exc.errors(include_input=False,include_context=False)[:3]:
+            messages.append(".".join(map(str,error["loc"]))+": "+error["msg"].removeprefix("Value error, "))
+        raise ValueError("\n".join(messages)) from None
+    if normalized.get("negative_prompt","").strip() and normalized["cfg"]<=1:raise ValueError("--neg requiere CFG mayor que1.")
+    for key in ("profile","steps","cfg","lora","sampler_name","scheduler","negative_prompt","mu","upscale","acceleration","unet_name","weight_dtype"):
+        if normalized.get(key) is not None:recipe[key]=normalized[key]
     if recipe.get("profile") not in {"base", "sft"}:
         raise ValueError("--profile debe ser base o sft.")
-    if recipe["width"]%16 or recipe["height"]%16 or not 256<=recipe["width"]<=2048 or not 256<=recipe["height"]<=2048 or recipe["width"]*recipe["height"]>2097152:
-        raise ValueError(f"Resolución -w {recipe['width']} -h {recipe['height']} inválida: ambos valores deben ser múltiplos de 16, estar entre 256 y 2048 y no superar 2 MP.")
+    if recipe["width"]%16 or recipe["height"]%16 or not 256<=recipe["width"]<=4096 or not 256<=recipe["height"]<=4096 or recipe["width"]*recipe["height"]>4194304:
+        raise ValueError(f"Resolución -w {recipe['width']} -h {recipe['height']} inválida: ambos valores deben ser múltiplos de 16, estar entre 256 y 4096 y no superar 4 MP.")
     if len(loras)>8: raise ValueError("Máximo8 LoRAs")
     if not 1<=recipe.get("steps",8)<=80: raise ValueError("--steps debe estar entre 1 y 80.")
     if not 1<=recipe.get("cfg",1)<=12: raise ValueError("--cfg debe estar entre 1 y 12.")
@@ -149,6 +158,9 @@ def progress_text(event):
 
 
 def _progress_stage(event):
+    if event.get("event")=="upscale.progress":
+        return f"Flow Upscaler x{event['scale']} · imagen {event['image']}/{event['total']} · pasada {event['pass_index']}"
+
     if event.get("event")=="sampling.progress":
         step,total = event["step"],event["total"]
         n = min(10, int(step*10/total))

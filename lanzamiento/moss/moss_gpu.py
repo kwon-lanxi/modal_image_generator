@@ -35,9 +35,10 @@ GPU_IMAGE = (
           "TORCHINDUCTOR_COMPILE_THREADS": "1"})
 )
 GPU_IMAGE = GPU_IMAGE.add_local_file(str(HERE / "moss_gpu.py"), "/root/moss_gpu.py", copy=True)
-GPU_SOURCE_FILES = ('__init__.py', 'config.py', 'profiles.json', 'contracts.py', 'files.py', 'logging_utils.py', 'progress.py', 'engine.py', 'snapshot.py')
+GPU_SOURCE_FILES = ('__init__.py', 'config.py', 'profiles.json', 'contracts.py', 'files.py', 'logging_utils.py', 'progress.py', 'engine.py', 'snapshot.py', 'resolution.py', 'acceleration.py', 'acceleration_sources.json', 'idm.py', 'flow_upscale.py')
 GPU_IMAGE = GPU_IMAGE.add_local_dir(str(HERE / "moss_service"), "/root/moss_service", copy=True,
     ignore=lambda path: path.name not in GPU_SOURCE_FILES)
+GPU_IMAGE=GPU_IMAGE.add_local_dir(str(HERE / "moss_service" / "vendor"), "/root/moss_service/vendor",copy=True)
 @gpu_app.cls(image=GPU_IMAGE, include_source=False,gpu=["L4", "L40S"], cpu=4, memory=(24576, 49152), volumes=ro,
          min_containers=0, max_containers=1, buffer_containers=0,
          single_use_containers=True, timeout=600, startup_timeout=1200,

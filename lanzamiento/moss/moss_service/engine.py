@@ -83,6 +83,10 @@ class Engine:
         for kind, expected in assets.items():
             if self.versions[kind]["version"] != expected["version"]:
                 raise RuntimeError("El snapshot no corresponde a la versión solicitada")
+        for item in request.get("auxiliary_assets",[])+([request["flow_asset"]] if request.get("flow_asset") else []):
+            kind="upscaler" if item is request.get("flow_asset") else "lora"
+            if describe(resolve(item["id"],kind))["version"]!=item["version"]:
+                raise RuntimeError("Un archivo auxiliar cambió mientras estaba en cola.")
         log = JobLog(job_id, component="gpu", sink=progress_sink)
         log.event("gpu.ready", gpu=torch.cuda.get_device_name())
         timings = {}
@@ -96,6 +100,7 @@ class Engine:
                 model, = ModelSamplingAuraFlow().patch_aura(model, shift=request["mu"])
             with log.stage("lora", timings):
                 for item in loras:
+                    if item.get("role")=="idm":continue
                     path = resolve(item["id"], "lora")
                     if describe(path)["version"] != item["version"]:
                         raise RuntimeError("Una LoRA cambió mientras estaba en cola")
@@ -118,12 +123,28 @@ class Engine:
                 log.event("sampling.progress", stage="sampling", step=step + 1, total=total,
                           percent=round(100 * (step + 1) / total, 1))
             with log.stage("sampling", timings):
-                samples = comfy.sample.sample(model, noise, request["steps"], request["cfg"],
-                          request["sampler_name"], request["scheduler"], positive, negative, latent,
-                          denoise=1.0, callback=progress, disable_pbar=True, seed=request["seed"])
+                from .acceleration import PRESETS
+                acceleration=PRESETS.get(request.get("acceleration"),{})
+                if request.get("idm_assets"):
+                    from .idm import sample_idm
+                    samples=sample_idm(model,noise,positive,request["idm_assets"],progress)
+                else:
+                    extra={}
+                    if acceleration.get("sigmas"):
+                        extra["sigmas"]=torch.tensor(acceleration["sigmas"],device="cpu",dtype=torch.float32)
+                    samples = comfy.sample.sample(model, noise, request["steps"], request["cfg"],
+                              request["sampler_name"], request["scheduler"], positive, negative, latent,
+                              denoise=1.0, callback=progress, disable_pbar=True, seed=request["seed"],**extra)
                 torch.cuda.synchronize()
+            upscale_metadata=None
+            if request.get("upscale",1)>1:
+                from .flow_upscale import upscale_batch
+                with log.stage("flow_upscale",timings):
+                    def upscale_progress(index,stage):
+                        log.event("upscale.progress",stage="flow_upscale",image=index+1,total=request["n"],pass_index=stage+1,scale=request["upscale"])
+                    samples,upscale_metadata=upscale_batch(samples,request["seeds"],request["upscale"],resolve(request["flow_asset"]["id"],"upscaler"),upscale_progress)
             with log.stage("decode", timings):
-                if request["use_tiled_vae"]:
+                if request["use_tiled_vae"] or request.get("upscale",1)>1:
                     # MOSS latent downscale=16; native VAE converts tile pixels to latent tiles.
                     image = self.vae.decode_tiled(samples, tile_x=request["vae_tile_size"] // 16,
                             tile_y=request["vae_tile_size"] // 16, overlap=request["vae_tile_overlap"] // 16)
@@ -148,6 +169,7 @@ class Engine:
                     "weight_dtype": self.preset["weight_dtype"], "compute_dtype": str(self.base.model.get_dtype()),
                     "torch": str(torch.__version__), "gpu": torch.cuda.get_device_name(),
                     
+                    "acceleration":request.get("acceleration"), "acceleration_recipe":acceleration, "upscale":upscale_metadata,
                     "turbo":request.get("turbo",False), "turbo12":request.get("turbo12",False),
                     "superturbo":request.get("superturbo",False),
                     "turbo_implementation":"data-archetype/moss_image_base_dmd2@8step" if request.get("turbo") else "anyMODE/moss-image-12step-turbo-lora@12step" if request.get("turbo12") else "akhaliq-2ded95c37a029360245926fe72e475e30039bbfb" if request.get("superturbo") else None,

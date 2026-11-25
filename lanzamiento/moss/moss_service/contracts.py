@@ -6,17 +6,23 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .acceleration import apply_preset, PRESETS
+from .resolution import request_dimensions
 from .config import profile
 
 
 class GenerateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    aspect_ratio: str | None = None
+    resolution_mp: float | None = Field(default=None,ge=.25,le=4)
     profile: Literal["base", "sft"] = "sft"
     unet_name: str | None = Field(default=None, min_length=1, max_length=512)
     clip_name: str | None = Field(default=None, min_length=1, max_length=512)
     vae_name: str | None = Field(default=None, min_length=1, max_length=512)
     model_type: Literal["base", "sft"] | None = None
     weight_dtype: Literal["default", "fp8_e4m3fn_fast", "fp8_e4m3fn", "fp8_e5m2"] | None = None
+    acceleration: str | None = None
+    upscale: Literal[1,2,4] = 1
     turbo: bool = False
     turbo12: bool = False
     superturbo: bool = False
@@ -25,18 +31,23 @@ class GenerateRequest(BaseModel):
     n: int = Field(default=1, ge=1, le=8)
     positive_prompt: str = Field(min_length=1, max_length=16000)
     negative_prompt: str = Field(default="", max_length=16000)
-    width: int = Field(default=1024, ge=256, le=2048)
-    height: int = Field(default=1024, ge=256, le=2048)
+    width: int = Field(default=1024, ge=256, le=4096)
+    height: int = Field(default=1024, ge=256, le=4096)
     seed: int = Field(default=0, ge=0, le=2**63 - 1)
     lora: dict[str, float] = Field(default_factory=dict, max_length=8)
     steps: int | None = Field(default=None, ge=1, le=80)
     cfg: float | None = Field(default=None, ge=1, le=12)
-    sampler_name: Literal["euler", "er_sde", "lcm"] = "euler"
+    sampler_name: Literal["euler", "er_sde", "lcm", "euler_ancestral"] = "euler"
     scheduler: Literal["simple", "beta", "normal"] = "simple"
     use_tiled_vae: bool = False
     vae_tile_size: int = Field(default=512, ge=128, le=1024, multiple_of=32)
     vae_tile_overlap: int = Field(default=64, ge=0, le=256, multiple_of=8)
     return_base64: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_resolution(cls,data):
+        return request_dimensions(apply_preset(data),16)
 
     @field_validator("width", "height")
     @classmethod
@@ -55,10 +66,12 @@ class GenerateRequest(BaseModel):
 
     @model_validator(mode="after")
     def bounded(self):
-        if self.width * self.height > 2097152:
-            raise ValueError("Máximo 2 megapíxeles latentes por trabajo")
+        if self.width * self.height > 4194304:
+            raise ValueError("Máximo 4 megapíxeles latentes por imagen")
         if self.vae_tile_overlap >= self.vae_tile_size:
             raise ValueError("overlap debe ser menor al tile")
+        if self.width*self.height*self.upscale**2>67_108_864 or max(self.width,self.height)*self.upscale>8192:
+            raise ValueError("La salida del upscaler supera 64 MP o 8192 px por lado; reducir --size.")
         return self
 
 
@@ -75,6 +88,7 @@ def normalize(payload: dict, mode: str) -> dict:
     if len(turbo_modes) > 1:
         raise ValueError("Elegir solo un modo: --turbo, --turbo12 o --superturbo")
     if turbo_modes:
+        if data["negative_prompt"].strip():raise ValueError("Este turbo usa CFG1 y no admite --neg.")
         mode = turbo_modes[0]
         if mode == "turbo":
             data.update(steps=8, cfg=1.0, sampler_name="lcm", scheduler="simple",
@@ -101,7 +115,7 @@ def normalize(payload: dict, mode: str) -> dict:
     data["seeds"] = independent_seeds(data["n"], data["seed"], data["seeds"])
     data["seed"] = data["seeds"][0]
     data["seed_string"] = str(data["seed"])
-    data["mode"] = mode
+    data["mode"] = "generate"
     data["effective_profile"] = preset
     return data
 

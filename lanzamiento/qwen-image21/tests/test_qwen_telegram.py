@@ -114,8 +114,8 @@ def test_queue_is_not_a_fake_percent():
 
 
 @pytest.mark.parametrize('ratio,dims',[
-    ('1:1',(1344,1344)),('16:9',(1664,928)),('9:16',(928,1664)),
-    ('4:3',(1472,1120)),('3:4',(1120,1472)),('3:2',(1600,1056)),('2:3',(1056,1600))])
+    ('1:1',(1216,1216)),('16:9',(1632,928)),('9:16',(928,1632)),
+    ('4:3',(1408,1056)),('3:4',(1056,1408)),('3:2',(1504,992)),('2:3',(992,1504))])
 def test_requested_aspect_ratios(ratio,dims):
     recipe=parse_prompt('portrait --size '+ratio,{})
     assert (recipe['width'],recipe['height'])==dims

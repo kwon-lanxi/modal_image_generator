@@ -397,7 +397,7 @@ def handle(update):
         send(chat,"Referencias quitadas. El próximo prompt generará desde texto.");return
     if command=="/referencias":show_references(chat);return
     if command in {"/start","/help","/loras"}:
-        send(chat,"Qwen 2.1 personal\nPrompt !alias:0.8 --model alias --size 9:16 --n 4\n--turbo activa Viggle v0.3, 6 pasos y CFG1 · --neg \"texto negativo\" requiere CFG > 1\nProporciones: 1:1 · 16:9 · 9:16 · 4:3 · 3:4 · 3:2 · 2:3\n-w 896 -h 1152 --seed 42 --steps 25 --cfg 1 --ref 768\n/descargar ENLACE nombre\n/descargar_modelo ENLACE nombre\n/convertir_modelo --model alias --fp8-scaled (o --fp8-mixed)\nRespondé a una foto o álbum con la instrucción para editar. También acepta foto con caption. Sin respuesta genera desde texto. Modelos y alias se editan en Biblioteca > Modelos. Cada generación pide confirmación.",library())
+        send(chat,"Qwen 2.1 personal\nPrompt !alias:0.8 --model alias --size 9:16 --n 4\n--turbo activa Viggle v0.3, 6 pasos y CFG1 · --neg \"texto negativo\" requiere CFG > 1\nProporciones: 1:1 · 16:9 · 9:16 · 4:3 · 3:4 · 3:2 · 2:3\n-w 896 -h 1152 --seed 42 --steps 25 --cfg 1 --ref 768\n/descargar ENLACE nombre\n/descargar_modelo ENLACE nombre\n/convertir_modelo --model alias --fp8-scaled (o --fp8-mixed)\nRespondé a una foto o álbum con la instrucción para editar. También acepta foto con caption. Sin respuesta genera desde texto. Modelos y alias se editan en Biblioteca > Modelos. Cada generación pide confirmación.\n--size 16:9 2mp (o 2) · default 1.5 MP reales",library())
         return
     if command=="/modelos":
         send(chat,"Administrá alias, conversiones FP8 y checkpoints.",library("models"));return
@@ -501,7 +501,7 @@ def deliver_album(key,job):
             print(json.dumps({"event":"telegram.album.prepare","original_bytes":len(raw),
                               "upload_bytes":len(data),"seconds":round(time.perf_counter()-started,3)}))
             return data
-        with ThreadPoolExecutor(max_workers=min(3,len(images))) as pool:
+        with ThreadPoolExecutor(max_workers=1 if any(im.get("width",0)*im.get("height",0)>8_000_000 for im in images) else min(3,len(images))) as pool:
             prepared=list(pool.map(prepare,images))
     for index,image in enumerate(images):
         if len(cached)==len(images) and all(cached):

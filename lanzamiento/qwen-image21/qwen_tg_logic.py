@@ -8,12 +8,8 @@ import time
 from urllib.parse import parse_qsl
 
 OWNER = 7112930476
-ASPECT_RATIOS = {
-    "1:1": (1328, 1328), "16:9": (1664, 928), "9:16": (928, 1664),
-    "4:3": (1472, 1104), "3:4": (1104, 1472),
-    "3:2": (1584, 1056), "2:3": (1056, 1584),
-}
-ASPECT_RATIOS = {k: tuple((v+16)//32*32 for v in dims) for k,dims in ASPECT_RATIOS.items()}
+from qwen_service.resolution import RATIOS, dimensions, extract_size
+ASPECT_RATIOS = {ratio:dimensions(ratio,alignment=32) for ratio in RATIOS}
 SIZES = {**ASPECT_RATIOS, "square": ASPECT_RATIOS["1:1"],
          "cuadrado": ASPECT_RATIOS["1:1"], "vertical": ASPECT_RATIOS["9:16"],
          "horizontal": ASPECT_RATIOS["16:9"]}
@@ -38,6 +34,7 @@ def parse_prompt(text, aliases, model_aliases=None):
         tokens = shlex.split(text)
     except ValueError:
         raise ValueError('Hay comillas sin cerrar. Usá comillas dobles para valores con espacios, por ejemplo --neg "texto negativo".') from None
+    tokens,size_mp=extract_size(tokens)
     prompt, loras, options = [], {}, {}
     names = {"-w":"width", "-h":"height", "--seed":"seed", "--steps":"steps", "--cfg":"cfg", "--n":"n", "--vae":"vae_alias", "--size":"size", "--ref":"reference_resolution", "--model":"unet_name", "--profile":"profile", "--neg":"negative_prompt"}
     i = 0
@@ -69,8 +66,9 @@ def parse_prompt(text, aliases, model_aliases=None):
     if not prompt: raise ValueError("Escribí un prompt")
     size = options.pop("size", "1:1")
     if size not in SIZES: raise ValueError(f"--size {size!r} no es válido. Elegí: " + ", ".join(ASPECT_RATIOS))
-    w,h = SIZES[size]
+    w,h = dimensions(size,size_mp if size_mp is not None else 1.5,alignment=32)
     recipe = {"positive_prompt":" ".join(prompt), "profile":"base", "width":w, "height":h, "lora":loras, "return_base64":False}
+    recipe.update(resolution_mp=size_mp if size_mp is not None else 1.5,aspect_ratio=size)
     model_name=options.get("unet_name")
     if model_name and model_aliases:
         found=next((value for alias,value in model_aliases.items() if alias.casefold()==model_name.casefold()),None)
@@ -100,8 +98,8 @@ def parse_prompt(text, aliases, model_aliases=None):
         recipe=turbo_settings(recipe)
     if recipe.get("profile") not in {"base", "base-bf16"}:
         raise ValueError("--profile debe ser base o base-bf16.")
-    if recipe["width"]%32 or recipe["height"]%32 or not 256<=recipe["width"]<=2048 or not 256<=recipe["height"]<=2048 or recipe["width"]*recipe["height"]>2097152:
-        raise ValueError(f"Resolución -w {recipe['width']} -h {recipe['height']} inválida: ambos valores deben ser múltiplos de 32, estar entre 256 y 2048 y no superar 2 MP.")
+    if recipe["width"]%32 or recipe["height"]%32 or not 256<=recipe["width"]<=4096 or not 256<=recipe["height"]<=4096 or recipe["width"]*recipe["height"]>4194304:
+        raise ValueError(f"Resolución -w {recipe['width']} -h {recipe['height']} inválida: ambos valores deben ser múltiplos de 32, estar entre 256 y 4096 y no superar 4 MP.")
     if len(loras)>8: raise ValueError("Máximo8 LoRAs")
     if not 1<=recipe.get("steps",25)<=80: raise ValueError("--steps debe estar entre 1 y 80.")
     if not 1<=recipe.get("cfg",1)<=12: raise ValueError("--cfg debe estar entre 1 y 12.")

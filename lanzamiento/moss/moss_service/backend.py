@@ -38,6 +38,18 @@ def prepare_generation(payload: dict, mode: str) -> tuple[dict, dict, list[dict]
     for name, weight in request["lora"].items():
         if weight != 0:
             loras.append({**describe(resolve(name, "lora"), include_metadata=True), "strength": weight})
+    from .acceleration import PRESETS
+    selected=PRESETS.get(request.get("acceleration"),{})
+    if selected.get("sampler")=="idm_dataspace":
+        for item in loras:
+            if item["id"].endswith("moss-idm2/lora.safetensors"):item["role"]="idm"
+        request["idm_assets"]={"lora":"loras/moss-idm2/lora.safetensors","time":"loras/moss-idm2/time_embedding.safetensors","dataspace":"loras/moss-idm2/dataspace.safetensors"}
+        request["auxiliary_assets"]=[describe(resolve(name,"lora")) for name in request["idm_assets"].values()]
+        header=__import__(__package__+".files",fromlist=["safetensors_header"]).safetensors_header(resolve(preset["model"],"unet"))
+        if any(v.get("dtype") in {"I8","F8_E4M3","F8_E5M2"} for k,v in header.items() if k!="__metadata__"):
+            raise ValueError("IDM requiere el checkpoint BF16; el modelo seleccionado está cuantizado.")
+    if request["upscale"]>1:
+        request["flow_asset"]=describe(resolve("flow_upscaler","upscaler"))
     if mode == "preview":
         # Fail in CPU before starting GPU if optional preview assets are absent.
         resolve(preset["tae"], "tae")
@@ -163,6 +175,8 @@ class Backend:
                         for index,(pixels,seed) in enumerate(zip(batch_pixels,request["seeds"])):
                             child_request={**request,"n":1,"seed":seed,"seed_string":str(seed),"seeds":[seed]}
                             child_generated={**generated,"pixels":pixels,"timing":{k:v/request["n"] for k,v in generated["timing"].items()},"metadata":{**generated["metadata"],"batch_timing":generated["timing"],"batch_index":index,"batch_count":request["n"],"parent_job_id":request_id}}
+                            if generated["metadata"].get("upscale"):
+                                child_generated["metadata"]["upscale"]={**generated["metadata"]["upscale"],"seeds":[generated["metadata"]["upscale"]["seeds"][index]]}
                             child_id=hashlib.sha256((request_id+":"+str(index)).encode()).hexdigest()[:32]
                             child=save_result(child_generated,child_request,child_id,log,self.commit,self.r2)
                             images.extend(child["images"])

@@ -13,7 +13,7 @@ from . import config
 
 MODEL_TYPES = {
     "unet": "diffusion_models", "clip": "text_encoders", "vae": "vae",
-    "lora": "loras", "tae": "vae_approx",
+    "lora": "loras", "tae": "vae_approx", "upscaler": "latent_upscale_models",
 }
 EXCLUDED = {"_backups", "save_lora", "cache", "caches", "logs", ".git"}
 

@@ -301,7 +301,7 @@ def handle(update):
     if command=="/galeria":
         send(chat,"Tus imágenes y recetas guardadas.",library("gallery"));return
     if command in {"/start","/help","/loras"}:
-        send(chat,"Krea2 personal\nPrompt !alias:0.8 --model alias --size 9:16 --n 4\n--profile turbo/raw elige la familia del modelo · --neg \"texto negativo\"\n--neg requiere CFG > 1 (usa --profile raw o --cfg > 1)\n--vae base/wanx2/realvae/HDvae\nProporciones: 1:1 · 16:9 · 9:16 · 4:3 · 3:4 · 3:2 · 2:3\n-w 896 -h 1152 --seed 42 --steps 8 --cfg 1\n/descargar ENLACE nombre\n/descargar_modelo ENLACE nombre\n/convertir_modelo --model alias --fp8-scaled (o --fp8-mixed)\nLos alias y pesos se editan en Biblioteca; los modelos, en Modelos. Cada generación pide confirmación.\n--variance balanced (opcional; off por defecto) · /variacion\n--sampler euler --scheduler simple · /muestreo",library())
+        send(chat,"Krea2 personal\nPrompt !alias:0.8 --model alias --size 9:16 --n 4\n--profile turbo/raw elige la familia del modelo · --neg \"texto negativo\"\n--neg requiere CFG > 1 (usa --profile raw o --cfg > 1)\n--vae base/wanx2/realvae/HDvae\nProporciones: 1:1 · 16:9 · 9:16 · 4:3 · 3:4 · 3:2 · 2:3\n-w 896 -h 1152 --seed 42 --steps 8 --cfg 1\n/descargar ENLACE nombre\n/descargar_modelo ENLACE nombre\n/convertir_modelo --model alias --fp8-scaled (o --fp8-mixed)\nLos alias y pesos se editan en Biblioteca; los modelos, en Modelos. Cada generación pide confirmación.\n--size 16:9 2mp (o 2) · default 1.5 MP reales\n--variance balanced (opcional; off por defecto) · /variacion\n--sampler euler --scheduler simple · /muestreo",library())
         return
     if command=="/variacion":
         from krea_service.variance import PRESETS,DIRECTIONS,FADES,PROTECTION,TIMING
@@ -413,7 +413,7 @@ def deliver_album(key,job):
             print(json.dumps({"event":"telegram.album.prepare","original_bytes":len(raw),
                               "upload_bytes":len(data),"seconds":round(time.perf_counter()-started,3)}))
             return data
-        with ThreadPoolExecutor(max_workers=min(3,len(images))) as pool:
+        with ThreadPoolExecutor(max_workers=1 if any(im.get("width",0)*im.get("height",0)>8_000_000 for im in images) else min(3,len(images))) as pool:
             prepared=list(pool.map(prepare,images))
     for index,image in enumerate(images):
         if len(cached)==len(images) and all(cached):

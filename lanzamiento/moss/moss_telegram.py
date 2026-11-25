@@ -235,6 +235,15 @@ def draft(chat,recipe,source_message_id=None):
     ratio=next((k for k,v in ASPECT_RATIOS.items() if v==(recipe['width'],recipe['height'])),"Personalizado")
     loras=", ".join(Path(k).stem[:40]+":"+str(v) for k,v in recipe.get("lora",{}).items()) or "ninguna"
     text=f"MOSS · {ratio} · {recipe['width']}×{recipe['height']} · {recipe.get('steps',50)} pasos · {recipe.get('n',1)} imágenes\nLoRAs: {loras}"
+    from moss_service.acceleration import PRESETS
+    acceleration=PRESETS.get(recipe.get("acceleration"),{})
+    if acceleration:
+        text += "\nModo: "+recipe["acceleration"]
+        if acceleration.get("experimental"):text += "\nExperimental: IDM entrenado en SFT, aplicado sobre Base."
+        if recipe.get("cfg",1)>1:text += "\nCFG > 1: variante experimental con mayor coste."
+    if recipe.get("upscale",1)>1:
+        scale=recipe["upscale"]
+        text += f"\nFlow Upscaler x{scale} · salida {recipe['width']*scale}×{recipe['height']*scale} por imagen"
     message=send(chat,text,buttons([[button("Generar","go:"+key),button("Descartar","drop:"+key)]]),reply_to=source_message_id)
     state("put","job:"+key,{"status":"draft","chat":chat,"recipe":recipe,
           "source_message_id":source_message_id,"confirmation_id":message["message_id"]})
@@ -302,8 +311,12 @@ def handle(update):
         try:tg("setChatMenuButton",chat_id=chat,menu_button={"type":"web_app","text":"Biblioteca","web_app":{"url":PUBLIC_URL+"/mini"}})
         except RuntimeError:pass
     if command in {"/start","/help","/loras"}:
-        send(chat,"MOSS personal\nPrompt !alias:0.8 --size 9:16 --n 4\n--neg \"texto negativo\" (requiere CFG > 1)\n--turbo DMD2 (8 pasos) · --turbo12 (12 pasos) · --superturbo (4 pasos; sin --neg)\n--profile sft/base · --model alias_o_ID\n--convertir_modelo --model alias --fp8-scaled (o --fp8-mixed)\nLos alias de modelos se configuran en Modelos.\nProporciones: 1:1 · 16:9 · 9:16 · 4:3 · 3:4 · 3:2 · 2:3\n-w 896 -h 1152 --seed 42 --steps 8 --cfg 1\n/descargar ENLACE nombre\n/descargar_modelo ENLACE nombre\nLas LoRAs se editan en Biblioteca; los checkpoints, en Modelos. Cada generación pide confirmación.",library())
+        send(chat,"MOSS personal\nPrompt !alias:0.8 --size 9:16 --n 4\n--neg \"texto negativo\" (requiere CFG > 1)\n--turbo DMD2 (8 pasos) · --turbo12 (12 pasos) · --superturbo (4 pasos; sin --neg)\n--profile sft/base · --model alias_o_ID\n--convertir_modelo --model alias --fp8-scaled (o --fp8-mixed)\nLos alias de modelos se configuran en Modelos.\nProporciones: 1:1 · 16:9 · 9:16 · 4:3 · 3:4 · 3:2 · 2:3\n-w 896 -h 1152 --seed 42 --steps 8 --cfg 1\n/descargar ENLACE nombre\n/descargar_modelo ENLACE nombre\nLas LoRAs se editan en Biblioteca; los checkpoints, en Modelos. Cada generación pide confirmación.\n/turbo lista los aceleradores nuevos. --upscarler x2/x4\n--size 1:1 2mp · default 1.5 MP reales",library())
         return
+    if command=="/turbo":
+        from moss_service.acceleration import FLAGS,PRESETS
+        send(chat,"Aceleradores MOSS\n"+"\n".join(flag+" · "+str(PRESETS[key]["steps"])+" pasos · "+PRESETS[key]["family"] for flag,key in FLAGS.items())+
+             "\nLos flags seleccionan automáticamente la familia correspondiente. /help\n--upscarler x2 o x4 aplica Flow Upscaler al lote completo.\n--size 16:9 2mp: megapíxeles reales (default 1.5).\nIDM Base es experimental. SuperTurbo SFT acepta CFG2/negativo experimental; HaDeS Base hastaCFG1.5.");return
     if command=="/modelos":
         send(chat,"Administrá alias, conversiones FP8 y checkpoints.",library("models"));return
     if command=="/estado":
@@ -403,7 +416,7 @@ def deliver_album(key,job):
             print(json.dumps({"event":"telegram.album.prepare","original_bytes":len(raw),
                               "upload_bytes":len(data),"seconds":round(time.perf_counter()-started,3)}))
             return data
-        with ThreadPoolExecutor(max_workers=min(3,len(images))) as pool:
+        with ThreadPoolExecutor(max_workers=1 if any(im.get("width",0)*im.get("height",0)>8_000_000 for im in images) else min(3,len(images))) as pool:
             prepared=list(pool.map(prepare,images))
     for index,image in enumerate(images):
         if len(cached)==len(images) and all(cached):
@@ -706,7 +719,7 @@ def telegram_web():
 def telegram_configure(url):
     from moss_tg_logic import OWNER
     me=tg("getMe")
-    commands=[{"command":k,"description":v} for k,v in [("generar","Crear una imagen"),("loras","Biblioteca de LoRAs y alias"),("modelos","Administrar modelos y alias"),("convertir_modelo","Convertir un checkpoint a FP8"),("galeria","Imágenes y recetas"),("estado","Consultar trabajo actual"),("trabajos","Últimos trabajos"),("descargar","Descargar una LoRA por enlace"),("descargar_modelo","Descargar un checkpoint MOSS"),("help","Ayuda y parámetros")]]
+    commands=[{"command":k,"description":v} for k,v in [("generar","Crear una imagen"),("turbo","Aceleradores y upscaler MOSS"),("loras","Biblioteca de LoRAs y alias"),("modelos","Administrar modelos y alias"),("convertir_modelo","Convertir un checkpoint a FP8"),("galeria","Imágenes y recetas"),("estado","Consultar trabajo actual"),("trabajos","Últimos trabajos"),("descargar","Descargar una LoRA por enlace"),("descargar_modelo","Descargar un checkpoint MOSS"),("help","Ayuda y parámetros")]]
     tg("setMyCommands",commands=commands)
     tg("setChatMenuButton",menu_button={"type":"web_app","text":"Biblioteca","web_app":{"url":url.rstrip("/")+"/mini"}})
     result=tg("setWebhook",url=url.rstrip("/")+"/webhook",secret_token=os.environ["TELEGRAM_WEBHOOK_SECRET"],allowed_updates=["message","callback_query"],max_connections=2,drop_pending_updates=False)

@@ -8,11 +8,8 @@ import time
 from urllib.parse import parse_qsl
 
 OWNER = 7112930476
-ASPECT_RATIOS = {
-    "1:1": (1328, 1328), "16:9": (1664, 928), "9:16": (928, 1664),
-    "4:3": (1472, 1104), "3:4": (1104, 1472),
-    "3:2": (1584, 1056), "2:3": (1056, 1584),
-}
+from krea_service.resolution import RATIOS, dimensions, extract_size
+ASPECT_RATIOS = {ratio:dimensions(ratio,alignment=16) for ratio in RATIOS}
 SIZES = {**ASPECT_RATIOS, "square": ASPECT_RATIOS["1:1"],
          "cuadrado": ASPECT_RATIOS["1:1"], "vertical": ASPECT_RATIOS["9:16"],
          "horizontal": ASPECT_RATIOS["16:9"]}
@@ -37,6 +34,7 @@ def parse_prompt(text, aliases, model_aliases=None):
         tokens = shlex.split(text)
     except ValueError:
         raise ValueError('Hay comillas sin cerrar. Usá comillas dobles para valores con espacios, por ejemplo --neg "texto negativo".') from None
+    tokens,size_mp=extract_size(tokens)
     prompt, loras, options = [], {}, {}
     names = {"-w":"width", "-h":"height", "--seed":"seed", "--steps":"steps", "--cfg":"cfg", "--n":"n", "--vae":"vae_alias", "--size":"size", "--model":"unet_name", "--profile":"profile", "--neg":"negative_prompt"}
     names.update({"--sampler":"sampler_name","--sample":"sampler_name","--scheduler":"scheduler","--screluder":"scheduler",
@@ -76,8 +74,9 @@ def parse_prompt(text, aliases, model_aliases=None):
     if not prompt: raise ValueError("Escribí un prompt")
     size = options.pop("size", "1:1")
     if size not in SIZES: raise ValueError(f"--size {size!r} no es válido. Elegí: " + ", ".join(ASPECT_RATIOS))
-    w,h = SIZES[size]
+    w,h = dimensions(size,size_mp if size_mp is not None else 1.5,alignment=16)
     recipe = {"positive_prompt":" ".join(prompt), "profile":"turbo", "width":w, "height":h, "lora":loras, "return_base64":False}
+    recipe.update(resolution_mp=size_mp if size_mp is not None else 1.5,aspect_ratio=size)
     model_name=options.get("unet_name")
     if model_name and model_aliases:
         found=next((value for alias,value in model_aliases.items() if alias.casefold()==model_name.casefold()),None)
@@ -100,8 +99,8 @@ def parse_prompt(text, aliases, model_aliases=None):
                 raise ValueError(f"{flag} debe ser {expected}; recibí {value[:48]!r}.") from None
     if recipe.get("profile") not in {"turbo", "turbo-scaled", "raw"}:
         raise ValueError("--profile debe ser turbo, turbo-scaled o raw.")
-    if recipe["width"]%16 or recipe["height"]%16 or not 256<=recipe["width"]<=2048 or not 256<=recipe["height"]<=2048 or recipe["width"]*recipe["height"]>2097152:
-        raise ValueError(f"Resolución -w {recipe['width']} -h {recipe['height']} inválida: ambos valores deben ser múltiplos de 16, estar entre 256 y 2048 y no superar 2 MP.")
+    if recipe["width"]%16 or recipe["height"]%16 or not 256<=recipe["width"]<=4096 or not 256<=recipe["height"]<=4096 or recipe["width"]*recipe["height"]>4194304:
+        raise ValueError(f"Resolución -w {recipe['width']} -h {recipe['height']} inválida: ambos valores deben ser múltiplos de 16, estar entre 256 y 4096 y no superar 4 MP.")
     if len(loras)>8: raise ValueError("Máximo8 LoRAs")
     default_cfg = 3.5 if recipe.get("profile") == "raw" else 1.0
     if recipe.get("negative_prompt", "").strip() and recipe.get("cfg", default_cfg) <= 1:
