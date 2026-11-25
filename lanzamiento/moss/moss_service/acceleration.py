@@ -48,7 +48,11 @@ def apply_preset(payload):
     cfg=data.get("cfg") if data.get("cfg") is not None else preset["cfg"]
     if not 1<=cfg<=preset["max_cfg"]:raise ValueError("--"+name+" admite CFG entre 1 y "+str(preset["max_cfg"]))
     if data.get("negative_prompt","").strip() and cfg<=1:raise ValueError("--neg necesita CFG > 1; este modo se está ejecutando a CFG 1.")
-    data.update(steps=preset["steps"],cfg=cfg,mu=preset["mu"],sampler_name=preset["sampler"] if preset["sampler"]!="idm_dataspace" else "euler",scheduler="simple")
+    sampler=preset["sampler"] if preset["sampler"]!="idm_dataspace" else "euler"
+    if preset.get("sigmas") or preset["sampler"]=="idm_dataspace":
+        from .sampling import validate_choices
+        validate_choices(data,{"sampler_name":sampler,"scheduler":"simple"},"--"+name+" (muestreo fijo)")
+    data.update(steps=preset["steps"],cfg=cfg,mu=preset["mu"],sampler_name=data.get("sampler_name") or sampler,scheduler=data.get("scheduler") or "simple")
     loras=dict(data.get("lora",{}))
     files={p["file"] for p in PRESETS.values()}|{"loras/moss_image_base_dmd2_v2_bf16.safetensors","loras/moss-turbo-4step.safetensors","loras/moss-dmd-8step.safetensors","loras/12_step_turbo_moss_1024_distill_v8_r64.safetensors"}
     if any(k in files and k!=preset["file"] for k in loras):raise ValueError("No combinar LoRAs de aceleración.")

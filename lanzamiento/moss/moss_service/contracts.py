@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .acceleration import apply_preset, PRESETS
 from .resolution import request_dimensions
+from .sampling import SAMPLERS, SCHEDULERS, validate_choices
 from .config import profile
 
 
@@ -37,8 +38,8 @@ class GenerateRequest(BaseModel):
     lora: dict[str, float] = Field(default_factory=dict, max_length=8)
     steps: int | None = Field(default=None, ge=1, le=80)
     cfg: float | None = Field(default=None, ge=1, le=12)
-    sampler_name: Literal["euler", "er_sde", "lcm", "euler_ancestral"] = "euler"
-    scheduler: Literal["simple", "beta", "normal"] = "simple"
+    sampler_name: Literal[tuple(SAMPLERS)] = "euler"
+    scheduler: Literal[tuple(SCHEDULERS)] = "simple"
     use_tiled_vae: bool = False
     vae_tile_size: int = Field(default=512, ge=128, le=1024, multiple_of=32)
     vae_tile_overlap: int = Field(default=64, ge=0, le=256, multiple_of=8)
@@ -47,6 +48,7 @@ class GenerateRequest(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def default_resolution(cls,data):
+        if isinstance(data,dict):validate_choices(data)
         return request_dimensions(apply_preset(data),16)
 
     @field_validator("width", "height")
@@ -111,6 +113,8 @@ def normalize(payload: dict, mode: str) -> dict:
         if other_adapters.intersection(data["lora"]):
             raise ValueError("No combinar adaptadores de aceleración")
         data["lora"][adapter]=1.0
+        for key in ("sampler_name","scheduler"):
+            if key in payload:data[key]=payload[key]
         if len(data["lora"])>8:raise ValueError("Máximo 8 LoRAs incluyendo aceleración")
     data["seeds"] = independent_seeds(data["n"], data["seed"], data["seeds"])
     data["seed"] = data["seeds"][0]

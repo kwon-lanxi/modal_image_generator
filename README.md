@@ -100,3 +100,9 @@ Los webhooks se configuran mediante las funciones de configuración de cada app.
 - Mantener descargas, conversiones, archivos, metadatos, R2 y gestión en CPU; reservar GPU para inferencia.
 - No borrar pesos de volúmenes ni cambiar Secrets durante un despliegue normal.
 - No incluir tokens, `.local-api-token`, directorios de caché ni pesos en commits.
+
+### Samplers y schedulers en los bots
+
+Krea2, MOSS y Qwen aceptan `--sample heun --scheduler beta`; también `--sampler` y `--screluder`. MOSS y Qwen exponen el catálogo de Krea2 (45 samplers y 9 schedulers), tanto por API (`sampler_name`, `scheduler`) como en sus playgrounds. Los nombres inválidos se rechazan antes de solicitar GPU. Se conservan las opciones al repetir una imagen y en los metadatos de la generación.
+
+En MOSS, los turbos normales permiten experimentar con esos flags; si no se indican conservan la receta del acelerador. Los modos IDM de 2 pasos y `--superturbo-sft` tienen muestreo fijo: rechazan cambios incompatibles. Qwen `--turbo` mantiene Euler + `viggle_turbo`; para elegir libremente sampler/scheduler, usar el modo normal.

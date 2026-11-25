@@ -37,6 +37,7 @@ def parse_prompt(text, aliases, model_aliases=None):
     tokens,size_mp=extract_size(tokens)
     prompt, loras, options = [], {}, {}
     names = {"-w":"width", "-h":"height", "--seed":"seed", "--steps":"steps", "--cfg":"cfg", "--n":"n", "--vae":"vae_alias", "--size":"size", "--ref":"reference_resolution", "--model":"unet_name", "--profile":"profile", "--neg":"negative_prompt"}
+    names.update({"--sample":"sampler_name","--sampler":"sampler_name","--scheduler":"scheduler","--screluder":"scheduler"})
     i = 0
     while i < len(tokens):
         t = tokens[i]
@@ -79,7 +80,7 @@ def parse_prompt(text, aliases, model_aliases=None):
         if vae_alias.lower() not in VAE_ALIASES:raise ValueError(f"VAE {vae_alias!r} no reconocido. Consultá /help para ver los VAE disponibles.")
         recipe["vae_name"]=VAE_ALIASES[vae_alias.lower()]
     for key,value in options.items():
-        if key in {"unet_name", "profile", "negative_prompt"}:
+        if key in {"unet_name", "profile", "negative_prompt", "sampler_name", "scheduler"}:
             recipe[key] = value
         elif key == "turbo":
             recipe[key] = bool(value)
@@ -93,6 +94,10 @@ def parse_prompt(text, aliases, model_aliases=None):
                 raise ValueError(f"{flag} debe ser un entero; recibí {value[:48]!r}.") from None
     if options.get("turbo") and recipe.get("negative_prompt", "").strip():
         raise ValueError("--neg requiere CFG mayor que 1; no se puede combinar con --turbo")
+    from qwen_service.sampling import validate_choices
+    validate_choices(recipe, {"sampler_name":"euler","scheduler":"viggle_turbo"} if options.get("turbo") else None,"Viggle --turbo")
+    if recipe.get("scheduler")=="viggle_turbo" and not options.get("turbo"):
+        raise ValueError("--scheduler viggle_turbo requiere --turbo.")
     if options.get("turbo"):
         from qwen_service.contracts import turbo_settings
         recipe=turbo_settings(recipe)

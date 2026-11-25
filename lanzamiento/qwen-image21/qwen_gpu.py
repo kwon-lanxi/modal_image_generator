@@ -37,7 +37,7 @@ GPU_IMAGE = (
           "TORCHINDUCTOR_COMPILE_THREADS": "1"})
 )
 GPU_IMAGE = GPU_IMAGE.add_local_file(str(HERE / "qwen_gpu.py"), "/root/qwen_gpu.py", copy=True)
-GPU_SOURCE_FILES = ('__init__.py', 'config.py', 'profiles.json', 'contracts.py', 'files.py', 'logging_utils.py', 'progress.py', 'engine.py', 'snapshot.py', 'resolution.py', 'cuda_init.py')
+GPU_SOURCE_FILES = ('__init__.py', 'config.py', 'profiles.json', 'contracts.py', 'files.py', 'logging_utils.py', 'progress.py', 'engine.py', 'snapshot.py', 'resolution.py', 'sampling.py', 'sampling_options.json', 'cuda_init.py')
 for name in GPU_SOURCE_FILES:
     GPU_IMAGE = GPU_IMAGE.add_local_file(str(HERE / "qwen_service" / name), "/root/qwen_service/"+name, copy=True)
 GPU_IMAGE = GPU_IMAGE.add_local_dir(str(HERE / "qwen_service" / "vendor"), "/root/qwen_service/vendor", copy=True, ignore=["__pycache__", "*.pyc"])

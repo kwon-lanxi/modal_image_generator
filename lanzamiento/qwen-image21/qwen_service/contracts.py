@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .resolution import request_dimensions
 from .config import profile
+from .sampling import SAMPLERS, SCHEDULERS, validate_choices
 
 TURBO_LORA = "loras/Qwen-Image-2.1-viggle-turbo-v0.3-6step-lora-r256.safetensors"
 
@@ -50,8 +51,8 @@ class GenerateRequest(BaseModel):
     lora: dict[str, float] = Field(default_factory=dict, max_length=8)
     steps: int | None = Field(default=None, ge=1, le=80)
     cfg: float | None = Field(default=None, ge=1, le=12)
-    sampler_name: Literal["euler", "er_sde"] = "euler"
-    scheduler: Literal["simple", "beta", "normal", "viggle_turbo"] = "simple"
+    sampler_name: Literal[tuple(SAMPLERS)] = "euler"
+    scheduler: Literal[tuple(SCHEDULERS+["viggle_turbo"])] = "simple"
     use_tiled_vae: bool = False
     vae_tile_size: int = Field(default=512, ge=128, le=1024, multiple_of=32)
     vae_tile_overlap: int = Field(default=64, ge=0, le=256, multiple_of=8)
@@ -60,6 +61,8 @@ class GenerateRequest(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def default_resolution(cls,data):
+        if isinstance(data,dict):
+            validate_choices(data)
         return request_dimensions(data,32)
 
     @field_validator("width", "height")
@@ -95,7 +98,11 @@ def normalize(payload: dict, mode: str) -> dict:
         raise ValueError("Modo no válido")
     # Validate user types before applying fixed Turbo overrides (e.g. "false"
     # must not be interpreted as a truthy string by turbo_settings).
-    initial = GenerateRequest.model_validate(payload).model_dump()
+    validated = GenerateRequest.model_validate(payload)
+    if validated.turbo:
+        validate_choices({k:getattr(validated,k) for k in validated.model_fields_set},
+                         {"sampler_name":"euler","scheduler":"viggle_turbo"},"Viggle --turbo")
+    initial = validated.model_dump()
     data = GenerateRequest.model_validate(turbo_settings(initial)).model_dump()
     if data["scheduler"] == "viggle_turbo" and not data["turbo"]:
         raise ValueError("Usar turbo=true para el muestreo Viggle")
